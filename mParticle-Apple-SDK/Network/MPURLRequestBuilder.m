@@ -192,7 +192,7 @@ static NSTimeInterval requestTimeout = 30.0;
     [urlRequest setHTTPMethod:_httpMethod];
 
     if (SDKURLRequest) {
-        NSString *deviceLocale = [[NSLocale autoupdatingCurrentLocale] localeIdentifier];
+        NSString *deviceLocale = [[[[NSLocale autoupdatingCurrentLocale] localeIdentifier] componentsSeparatedByString:@"-"][0] componentsSeparatedByString:@"_"][0];
         MPKitContainer *kitContainer = [MPKitContainer sharedInstance];
         NSArray<NSNumber *> *supportedKits = [kitContainer supportedKits];
         NSString *contentType = nil;
