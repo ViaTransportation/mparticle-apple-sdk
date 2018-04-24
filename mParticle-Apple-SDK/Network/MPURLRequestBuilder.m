@@ -36,7 +36,7 @@ static NSString *mpUserAgent = nil;
     if (!self || !url) {
         return nil;
     }
-    
+
     _url = url;
     _headerData = nil;
     _httpMethod = kMPHTTPMethodGet;
@@ -51,25 +51,25 @@ static NSString *mpUserAgent = nil;
     if (!message || !key) {
         return nil;
     }
-    
+
     const char *cKey = [key cStringUsingEncoding:NSUTF8StringEncoding];
     const char *cMessage = [message cStringUsingEncoding:NSUTF8StringEncoding];
     unsigned char cHMAC[CC_SHA256_DIGEST_LENGTH];
-    
+
     CCHmac(kCCHmacAlgSHA256, cKey, strlen(cKey), cMessage, strlen(cMessage), cHMAC);
-    
+
     NSMutableString *encodedMessage = [NSMutableString stringWithCapacity:(CC_SHA256_DIGEST_LENGTH << 1)];
-    
+
     for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; ++i) {
         [encodedMessage appendFormat:@"%02x", cHMAC[i]];
     }
-    
+
     return (NSString *)encodedMessage;
 }
 
 - (NSString *)userAgent {
     NSString *defaultUserAgent = [NSString stringWithFormat:@"mParticle Apple SDK/%@", MParticle.sharedInstance.version];
-    
+
     if (!mpUserAgent) {
         if (MParticle.sharedInstance.customUserAgent != nil) {
             mpUserAgent = MParticle.sharedInstance.customUserAgent;
@@ -84,13 +84,13 @@ static NSString *mpUserAgent = nil;
                     return mpUserAgent;
                 }
             }
-            
+
 #if !defined(MPARTICLE_APP_EXTENSIONS)
             if ([UIApplication sharedApplication].applicationState == UIApplicationStateBackground) {
                 return defaultUserAgent;
             }
 #endif
-            
+
             dispatch_block_t getUserAgent = ^{
                 @try {
                     UIWebView *webView = [[UIWebView alloc] initWithFrame:CGRectZero];
@@ -106,7 +106,7 @@ static NSString *mpUserAgent = nil;
                     MPILogError(@"Exception obtaining the user agent: %@", exception.reason);
                 }
             };
-            
+
             if ([NSThread isMainThread]) {
                 getUserAgent();
             } else {
@@ -117,7 +117,7 @@ static NSString *mpUserAgent = nil;
             return defaultUserAgent;
         }
     }
-    
+
     return mpUserAgent;
 }
 
@@ -128,11 +128,11 @@ static NSString *mpUserAgent = nil;
 #pragma mark Public class methods
 + (MPURLRequestBuilder *)newBuilderWithURL:(NSURL *)url {
     MPURLRequestBuilder *urlRequestBuilder = [[MPURLRequestBuilder alloc] initWithURL:url];
-    
+
     if (urlRequestBuilder) {
         urlRequestBuilder->SDKURLRequest = NO;
     }
-    
+
     return urlRequestBuilder;
 }
 
@@ -140,11 +140,11 @@ static NSString *mpUserAgent = nil;
     MPURLRequestBuilder *urlRequestBuilder = [[MPURLRequestBuilder alloc] initWithURL:url];
     [urlRequestBuilder withHttpMethod:httpMethod];
     urlRequestBuilder.message = message;
-    
+
     if (urlRequestBuilder) {
         urlRequestBuilder->SDKURLRequest = YES;
     }
-    
+
     return urlRequestBuilder;
 }
 
@@ -161,7 +161,7 @@ static NSString *mpUserAgent = nil;
 #pragma mark Public instance methods
 - (MPURLRequestBuilder *)withHeaderData:(NSData *)headerData {
     _headerData = headerData;
-    
+
     return self;
 }
 
@@ -171,13 +171,13 @@ static NSString *mpUserAgent = nil;
     } else {
         _httpMethod = kMPHTTPMethodGet;
     }
-    
+
     return self;
 }
 
 - (MPURLRequestBuilder *)withPostData:(NSData *)postData {
     _postData = postData;
-    
+
     return self;
 }
 
@@ -188,9 +188,9 @@ static NSString *mpUserAgent = nil;
     [urlRequest setHTTPMethod:_httpMethod];
 
     BOOL isIdentityRequest = [urlRequest.URL.host rangeOfString:@"identity"].location != NSNotFound;
-    
+
     if (SDKURLRequest || isIdentityRequest) {
-        NSString *deviceLocale = [[NSLocale autoupdatingCurrentLocale] localeIdentifier];
+        NSString *deviceLocale = [[[[NSLocale autoupdatingCurrentLocale] localeIdentifier] componentsSeparatedByString:@"-"][0] componentsSeparatedByString:@"_"][0];
         MPKitContainer *kitContainer = !isIdentityRequest ? [MPKitContainer sharedInstance] : nil;
         NSArray<NSNumber *> *supportedKits = [kitContainer supportedKits];
         NSString *contentType = nil;
@@ -202,7 +202,7 @@ static NSString *mpUserAgent = nil;
         NSString *secondsFromGMT = [NSString stringWithFormat:@"%ld", (unsigned long)[timeZone secondsFromGMT]];
         NSRange range;
         BOOL containsMessage = _message != nil;
-        
+
         if (isIdentityRequest) { // /identify, /login, /logout, /<mpid>/modify
             contentType = @"application/json";
             [urlRequest setValue:[MPStateMachine sharedInstance].apiKey forHTTPHeaderField:@"x-mp-key"];
@@ -210,60 +210,60 @@ static NSString *mpUserAgent = nil;
             signatureMessage = [NSString stringWithFormat:@"%@\n%@\n%@%@", _httpMethod, date, relativePath, postDataString];
         } else if (containsMessage) { // /events
             contentType = @"application/json";
-            
+
             if (supportedKits) {
                 kits = [supportedKits componentsJoinedByString:@","];
                 [urlRequest setValue:kits forHTTPHeaderField:@"x-mp-bundled-kits"];
                 kits = nil;
             }
-            
+
             NSArray<id<MPExtensionKitProtocol>> *activeKitsRegistry = [[MPKitContainer sharedInstance] activeKitsRegistry];
             if (activeKitsRegistry.count > 0) {
                 NSMutableArray<NSNumber *> *activeKitIds = [[NSMutableArray alloc] initWithCapacity:activeKitsRegistry.count];
-                
+
                 for (id<MPExtensionKitProtocol> kitRegister in activeKitsRegistry) {
                     [activeKitIds addObject:kitRegister.code];
                 }
-                
+
                 kits = [activeKitIds componentsJoinedByString:@","];
             }
-            
+
             range = [_message rangeOfString:kMPMessageTypeNetworkPerformance];
             if (range.location != NSNotFound) {
                 [urlRequest setValue:kMPMessageTypeNetworkPerformance forHTTPHeaderField:kMPMessageTypeNetworkPerformance];
             }
-            
+
             signatureMessage = [NSString stringWithFormat:@"%@\n%@\n%@%@", _httpMethod, date, relativePath, _message];
         } else { // /config and /audience
             contentType = @"application/x-www-form-urlencoded";
-            
+
             range = [relativePath rangeOfString:@"/config"];
             if (range.location != NSNotFound) {
                 if (supportedKits) {
                     kits = [supportedKits componentsJoinedByString:@","];
                 }
-                
+
                 NSString *environment = [NSString stringWithFormat:@"%d", (int)[MPStateMachine environment]];
                 [urlRequest setValue:environment forHTTPHeaderField:@"x-mp-env"];
-                
+
                 MPIUserDefaults *userDefaults = [MPIUserDefaults standardUserDefaults];
                 NSString *eTag = userDefaults[kMPHTTPETagHeaderKey];
                 if (eTag) {
                     [urlRequest setValue:eTag forHTTPHeaderField:@"If-None-Match"];
                 }
-                
+
                 NSString *query = [_url query];
                 signatureMessage = [NSString stringWithFormat:@"%@\n%@\n%@?%@", _httpMethod, date, relativePath, query];
             } else {
                 signatureMessage = [NSString stringWithFormat:@"%@\n%@\n%@", _httpMethod, date, relativePath];
             }
         }
-        
+
         NSString *hmacSha256Encode = [self hmacSha256Encode:signatureMessage key:[MPStateMachine sharedInstance].secret];
         if (hmacSha256Encode) {
             [urlRequest setValue:hmacSha256Encode forHTTPHeaderField:@"x-mp-signature"];
         }
-        
+
         if (kits) {
             [urlRequest setValue:kits forHTTPHeaderField:@"x-mp-kits"];
         }
@@ -274,7 +274,7 @@ static NSString *mpUserAgent = nil;
                 [urlRequest setValue:userAgent forHTTPHeaderField:@"User-Agent"];
             }
         }
-        
+
         [urlRequest setValue:@"gzip" forHTTPHeaderField:@"Accept-Encoding"];
         if (!isIdentityRequest) {
             [urlRequest setValue:@"gzip" forHTTPHeaderField:@"Content-Encoding"];
@@ -286,11 +286,11 @@ static NSString *mpUserAgent = nil;
         [urlRequest setValue:date forHTTPHeaderField:@"Date"];
     } else if (_headerData) {
         NSDictionary *headerDictionary = [NSJSONSerialization JSONObjectWithData:_headerData options:0 error:nil];
-        
+
         if (headerDictionary) {
             NSEnumerator *headerEnumerator = [headerDictionary keyEnumerator];
             NSString *key;
-            
+
             while ((key = [headerEnumerator nextObject])) {
                 [urlRequest setValue:headerDictionary[key] forHTTPHeaderField:key];
             }
@@ -300,7 +300,7 @@ static NSString *mpUserAgent = nil;
     if (_postData.length > 0) {
         [urlRequest setHTTPBody:_postData];
     }
-    
+
     return urlRequest;
 }
 
