@@ -1,25 +1,8 @@
-//
-//  MPKitContainer.h
-//
-//  Copyright 2016 mParticle, Inc.
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
-
 #import <Foundation/Foundation.h>
 #import <Foundation/Foundation.h>
 #import "MPExtensionProtocol.h"
 #import "MPKitProtocol.h"
+#import "mParticle.h"
 
 @class MPKitFilter;
 @class MPKitExecStatus;
@@ -28,6 +11,9 @@
 @class MPForwardQueueParameters;
 
 @interface MPKitContainer : NSObject
+
+@property (nonatomic, copy) void (^ _Nonnull attributionCompletionHandler)(MPAttributionResult *_Nullable attributionResult, NSError * _Nullable error);
+@property (nonatomic, strong, nonnull) NSMutableDictionary<NSNumber *, MPAttributionResult *> *attributionInfo;
 
 + (BOOL)registerKit:(nonnull id<MPExtensionKitProtocol>)kitRegister;
 + (nullable NSSet<id<MPExtensionKitProtocol>> *)registeredKits;
@@ -47,5 +33,8 @@
 - (void)forwardSDKCall:(nonnull SEL)selector errorMessage:(nullable NSString *)errorMessage exception:(nullable NSException *)exception eventInfo:(nullable NSDictionary *)eventInfo kitHandler:(void (^ _Nonnull)(id<MPKitProtocol> _Nonnull kit, MPKitExecStatus * _Nonnull * _Nonnull execStatus))kitHandler;
 - (void)forwardSDKCall:(nonnull SEL)selector kitHandler:(void (^ _Nonnull)(id<MPKitProtocol> _Nonnull kit, MPKitExecStatus * _Nonnull * _Nonnull execStatus))kitHandler;
 - (void)forwardSDKCall:(nonnull SEL)selector parameters:(nullable MPForwardQueueParameters *)parameters messageType:(MPMessageType)messageType kitHandler:(void (^ _Nonnull)(id<MPKitProtocol> _Nonnull kit, MPForwardQueueParameters * _Nullable forwardParameters, MPKitExecStatus * _Nonnull * _Nonnull execStatus))kitHandler;
-
+- (nullable NSDictionary<NSString *, NSString *> *)integrationAttributesForKit:(nonnull NSNumber *)kitCode;
+- (nullable NSDictionary<NSNumber *, NSString *> *)userIdentitiesForKit:(nonnull NSNumber *)kitCode;
+- (nullable NSDictionary<NSString *, id> *)userAttributesForKit:(nonnull NSNumber *)kitCode;
+- (BOOL)shouldDelayUpload: (NSTimeInterval) maxWaitTime;
 @end

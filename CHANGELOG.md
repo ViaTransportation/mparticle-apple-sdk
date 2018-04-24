@@ -1,5 +1,245 @@
 # mParticle Apple SDK CHANGELOG
 
+## 7.2.0
+
+This is a *high priority* update for all users of SDK v7. This update:
+- Ensures database migrations from v6 to v7 occur on a background thread.
+- Reduces the amount of data that is migrated.
+- Simplifies batch upload creation and session deletion logic to ensure the SDK's database is fully cleared when appropriate.
+
+## 7.1.5
+
+### Core SDK Updates
+
+- Avoid blocking the main thread while migrating the database
+- Clean up analyzer warnings
+
+### Kit Updates
+
+- None
+
+## 7.1.4
+
+### Core SDK Updates
+
+- None
+
+### Kit Updates
+
+- Leanplum
+
+#### Leanplum Email Campaigns
+
+The Leanplum kit has been updated to set "email" as a user attribute on the Leanplum SDK to enable Leanplum email campaigns. If you would not like to send email to Leanplum, you may filter email to Leanplum via the mParticle Filters UI.
+
+## 7.1.3
+
+### Core SDK Updates
+
+**This SDK release is a required update for all customers who are migrating from v6.**
+
+It fixes an issue where migrated user identities were not being included when building the initial identity request.
+
+### Kit Updates
+
+- None
+
+## 7.1.2
+
+### Core SDK Updates
+
+- Cache user agent until OS version changes
+- Fix Nil User Identity Issue
+
+This release optimizes the capture of user agent to only happen when the OS version changes.
+
+### Kit Updates
+
+- None
+
+## 7.1.1
+
+### Core SDK Updates
+
+- Avoid requesting config before start
+
+This release fixes a bug where the SDK could trigger a call to config before start was called.
+
+### Kit Updates
+
+- None
+
+## 7.1.0
+
+# IDSync
+
+Version 7.1.0 is the first non-beta release of the new mParticle IDSync framework. It contains many new features as well as breaking changes:
+
+- New Identity APIs allowing custom IDSync "strategies" per customer. 
+- Included in the new APIs is a `MParticleUser` object, as well as the new APIs for `login`, `logout`, `modify`, and more! [You can read more about the new Identity APIs here](https://docs.mparticle.com/developers/sdk/ios/identity).
+- `MParticleOptions` object for explicit SDK configuration.
+- New "Attribution" API, which replaces the former "deferred deeplink" API.
+
+## Migrating from SDK v6
+
+Prior to upgrading to version 7, your mParticle org **must** be provisioned with an Identity Strategy. Please contact the mParticle Customer Success team at support@mparticle.com. 
+
+The new SDK contains multiple breaking API changes. To learn how to migrate your existing code, please [reference the iOS migration guide](https://docs.mparticle.com/developers/sdk/ios/getting-started#upgrade-to-version-7-of-the-sdk).
+
+## 7.0.9
+
+### Core SDK Updates
+
+This release updates MPIdentityApiRequest by removing the copyUserAttributes setting, and adding an optional onUserAlias block. By setting this block on your request, you can copy user attributes per your business logic from one user to the next. You can also copy object from the user's cart.
+
+### Kit Updates
+
+- Update AppsFlyer with new attribution API
+- Update BranchMetrics with new attribution API
+- Update Button with new attribution API
+- Update Iterable with new attribution API
+- Update Singular with new attribution API
+- Update Tune with new attribution API
+- Update BranchMetrics SDK to 0.20.2
+- Update UrbanAirship kit with named user support
+
+## 7.0.8
+
+* [NEW] Introduce new deeplinking API
+
+## 7.0.7
+
+* [FIX] Allow concurrent internal modify requests
+
+## 7.0.6
+
+* [FIX] Ensure Identifying flag is flipped on API timeout
+
+## 7.0.5
+
+* [FIX] Fixes and enhancements to Identity API error callbacks
+
+## 7.0.4
+
+* [FIX] Remove MPUtils.h/m
+
+## 7.0.3
+
+* [FIX] Ensure the correct mpid is used in batches
+* [FIX] Fix device application stamp
+
+## 7.0.2
+
+* [FIX] Propagate Identity API errors to original caller
+
+## 7.0.0
+
+* [NEW] New identity APIs
+
+## 6.15.12
+
+### Core SDK Updates
+
+- Disable code coverage settings
+- Limit how often config requests can be sent
+
+### Kit Updates
+
+- Update Appboy kit with simplified endpoint logic
+- Update ComScore SDK to 5.0
+
+## 6.15.11
+
+### Core SDK Updates
+
+- Delay deeplinking call to kits if necessary
+
+### Kit Updates
+
+- Update AppsFlyer kit to support onAppOpenAttribution
+- Update AppsFlyer SDK to 4.8.0
+- Update Branch SDK to 0.18.8
+
+## 6.15.10
+
+### Core SDK Updates
+
+- None
+
+### Kit Updates
+
+- Fix Localytics SDK version
+
+## 6.15.9
+
+### Core SDK Updates
+
+- None
+
+### Kit Updates
+
+- Update Localytics SDK version
+
+## 6.15.8
+
+### Core SDK Updates
+
+- Set transaction attributes on kit purchase events
+
+### Kit Updates
+
+- Add Adobe kit
+
+## 6.15.7
+
+### Core SDK Updates
+
+- None
+
+### Kit Updates
+
+- Update AppsFlyer kit to support checking for deep links
+- Update UrbanAirship kit to add transaction id to purchase events
+
+## 6.15.6
+
+### Core SDK Updates
+
+- Prevent deprecation warnings for iOS 11 deployment target
+
+### Kit Updates
+
+- Update Singular and Apptentive kits to support Carthage
+
+## 6.15.3
+
+### Core SDK Updates
+
+- Remove Git submodules from the repo to address https://github.com/mParticle/mparticle-apple-sdk/issues/49
+
+### Kit Updates
+
+- Update Singular kit with fixes from the Singular team: https://github.com/mparticle-integrations/mparticle-apple-integration-singular/pull/4
+
+## 6.15.0
+
+### Core SDK Updates
+
+- All kits repos are now git submodules within the core repository
+
+### Kit Updates
+
+- mParticle now support Singular (formerly Apsalar) via both a Kit and server-side integration!
+- This release introduces a class method to `MPKitAppsFlyer` such that implementing apps can set the AppsFlyer tracker delegate.
+- Update Kochava SDK to 3.2.0
+- Update Appboy SDK to 3.0.0
+- Update Branch SDK to 0.17.6
+
+## 6.14.5
+
+* [FIX] Fixes for Xcode 9 / iOS 11 and main thread checker
+* [NEW] Remove category on NSUserDefaults
+
 ## 6.14.4
 
 * [FIX] Ensure all server-side configuration settings are reloaded on every app-launch

@@ -1,28 +1,7 @@
-//
-//  MPIConstants.h
-//
-//  Copyright 2015 mParticle, Inc.
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
-
 #import "MPIConstants.h"
 
 // mParticle SDK Version
-NSString *const kMParticleSDKVersion = @"6.13.3";
-
-// Session Upload Settings
-NSString *const kMPSessionHistoryValue = @"sh";
+NSString *const kMParticleSDKVersion = @"7.2.1";
 
 // Message Type (dt)
 NSString *const kMPMessageTypeKey = @"dt";
@@ -50,6 +29,7 @@ NSString *const kMPLaunchNumberOfSessionInterruptionsKey = @"nsi";
 // Message Keys
 NSString *const kMPMessagesKey = @"msgs";
 NSString *const kMPMessageIdKey = @"id";
+NSString *const kMPMessageUserIdKey = @"mpid";
 NSString *const kMPTimestampKey = @"ct";
 NSString *const kMPSessionIdKey = @"sid";
 NSString *const kMPSessionStartTimestamp = @"sct";
@@ -66,17 +46,15 @@ NSString *const kMPEventTypePageView = @"pageview";
 NSString *const kMPUserIdentityArrayKey = @"ui";
 NSString *const kMPUserIdentityIdKey = @"i";
 NSString *const kMPUserIdentityTypeKey = @"n";
+NSString *const kMPUserIdentitySharedGroupIdentifier = @"sgi";
 NSString *const kMPAppStateTransitionType = @"t";
 NSString *const kMPEventTagsKey = @"tags";
 NSString *const kMPLeaveBreadcrumbsKey = @"l";
-NSString *const kMPSessionNumberKey = @"sn";
 NSString *const kMPOptOutKey = @"oo";
 NSString *const kMPDateUserIdentityWasFirstSet = @"dfs";
 NSString *const kMPIsFirstTimeUserIdentityHasBeenSet = @"f";
-NSString *const kMPRemoteNotificationCampaignHistoryKey = @"pch";
 NSString *const kMPRemoteNotificationContentIdHistoryKey = @"cntid";
 NSString *const kMPRemoteNotificationTimestampHistoryKey = @"ts";
-NSString *const kMPProductBagKey = @"pb";
 NSString *const kMPForwardStatsRecord = @"fsr";
 
 // Push Notifications
@@ -130,7 +108,6 @@ NSString *const kMPPresentedViewControllerKey = @"vc";
 NSString *const kMPMainThreadKey = @"mt";
 NSString *const kMPPreviousSessionStartKey = @"pss";
 NSString *const kMPAppFirstSeenInstallationKey = @"fi";
-NSString *const kMPInfluencedOpenTimerKey = @"infOpTmr";
 NSString *const kMPResponseURLKey = @"u";
 NSString *const kMPResponseMethodKey = @"m";
 NSString *const kMPResponsePOSTDataKey = @"d";
@@ -143,13 +120,20 @@ NSString *const kMPHTTPETagHeaderKey = @"ETag";
 NSString *const kMPAppSearchAdsAttributionKey = @"asaa";
 NSString *const kMPSynchedUserAttributesKey = @"SynchedUserAttributes";
 NSString *const kMPSynchedUserIdentitiesKey = @"SynchedUserIdentities";
+NSString *const kMPSessionUserIdsKey = @"smpids";
+NSString *const kMPIsEphemeralKey = @"is_ephemeral";
+NSString *const kMPLastIdentifiedDate = @"last_date_used";
+NSString *const kMPDeviceApplicationStampKey = @"das";
+NSString *const kMPDeviceApplicationStampStorageKey = @"dast";
+NSString *const kMPLastConfigReceivedKey = @"LastConfigReceived";
+NSString *const kMPUserAgentSystemVersionUserDefaultsKey = @"UserAgentSystemVersion";
+NSString *const kMPUserAgentValueUserDefaultsKey = @"UserAgentValue";
 
 // Remote configuration
 NSString *const kMPRemoteConfigExceptionHandlingModeKey = @"cue";
 NSString *const kMPRemoteConfigExceptionHandlingModeAppDefined = @"appdefined";
 NSString *const kMPRemoteConfigExceptionHandlingModeForce = @"forcecatch";
 NSString *const kMPRemoteConfigExceptionHandlingModeIgnore = @"forceignore";
-NSString *const kMPRemoteConfigNetworkPerformanceModeKey = @"cnp";
 NSString *const kMPRemoteConfigAppDefined = @"appdefined";
 NSString *const kMPRemoteConfigForceTrue = @"forcetrue";
 NSString *const kMPRemoteConfigForceFalse = @"forcefalse";
@@ -177,23 +161,17 @@ NSString *const kMPRemoteConfigLocationKey = @"lct";
 NSString *const kMPRemoteConfigLocationModeKey = @"ltm";
 NSString *const kMPRemoteConfigLocationAccuracyKey = @"acc";
 NSString *const kMPRemoteConfigLocationMinimumDistanceKey = @"mdf";
-NSString *const kMPRemoteConfigLatestSDKVersionKey = @"lsv";
 NSString *const kMPRemoteConfigRampKey = @"rp";
 NSString *const kMPRemoteConfigTriggerKey = @"tri";
 NSString *const kMPRemoteConfigTriggerEventsKey = @"evts";
 NSString *const kMPRemoteConfigTriggerMessageTypesKey = @"dts";
-NSString *const kMPRemoteConfigInfluencedOpenTimerKey = @"pio";
 NSString *const kMPRemoteConfigUniqueIdentifierKey = @"das";
 NSString *const kMPRemoteConfigBracketKey = @"bk";
 NSString *const kMPRemoteConfigRestrictIDFA = @"rdlat";
-NSString *const kMPRemoteConfigIncludeSessionHistory = @"inhd";
 
 // Notifications
 NSString *const kMPCrashReportOccurredNotification = @"MPCrashReportOccurredNotification";
 NSString *const kMPConfigureExceptionHandlingNotification = @"MPConfigureExceptionHandlingNotification";
-NSString *const kMPRemoteNotificationOpenKey = @"MPRemoteNotificationOpen";
-NSString *const kMPLogRemoteNotificationKey = @"MPLogRemoteNotification";
-NSString *const kMPEventCounterLimitReachedNotification = @"MPEventCounterLimitReachedNotification";
 NSString *const kMPRemoteNotificationReceivedNotification = @"MPRemoteNotificationReceivedNotification";
 NSString *const kMPUserNotificationDictionaryKey = @"MPUserNotificationDictionaryKey";
 NSString *const kMPUserNotificationActionKey = @"MPUserNotificationActionKey";
@@ -207,6 +185,9 @@ NSString *const kMPUserNotificationRunningModeKey = @"MPUserNotificationRunningM
 NSString *const kMPConfigPlist = @"MParticleConfig";
 NSString *const kMPConfigApiKey = @"api_key";
 NSString *const kMPConfigSecret = @"api_secret";
+NSString *const kMPConfigSharedGroupID = @"shared_group_id";
+NSString *const kMPConfigCustomUserAgent = @"custom_user_agent";
+NSString *const kMPConfigCollectUserAgent = @"collect_user_agent";
 NSString *const kMPConfigSessionTimeout = @"session_timeout";
 NSString *const kMPConfigUploadInterval = @"upload_interval";
 NSString *const kMPConfigEnableSSL = @"enable_secure_transport";
@@ -214,7 +195,6 @@ NSString *const kMPConfigEnableCrashReporting = @"enable_crash_reporting";
 NSString *const kMPConfigLocationTracking = @"enable_location_tracking";
 NSString *const kMPConfigLocationAccuracy = @"location_tracking_accuracy";
 NSString *const kMPConfigLocationDistanceFilter = @"location_tracking_distance_filter";
-NSString *const kMPConfigRegisterForSilentNotifications = @"register_for_silent_notifications";
 
 // Data connection path/status
 NSString *const kDataConnectionOffline = @"offline";
@@ -248,6 +228,10 @@ NSString *const kMParticleWebViewPathRemoveUserTag = @"removeUserTag";
 NSString *const kMParticleWebViewPathSetUserAttribute = @"setUserAttribute";
 NSString *const kMParticleWebViewPathRemoveUserAttribute = @"removeUserAttribute";
 NSString *const kMParticleWebViewPathSetSessionAttribute = @"setSessionAttribute";
+NSString *const kMParticleWebViewPathIdentify = @"identify";
+NSString *const kMParticleWebViewPathLogout = @"logout";
+NSString *const kMParticleWebViewPathLogin = @"login";
+NSString *const kMParticleWebViewPathModify = @"modify";
 
 //
 // Primitive data type constants
@@ -269,7 +253,8 @@ const NSTimeInterval DEFAULT_SESSION_TIMEOUT =
     #endif
 
 const NSTimeInterval TWENTY_FOUR_HOURS = 86400; // database clean up interval
-const NSTimeInterval ONE_HUNDRED_EIGHTY_DAYS = 60 * 60 * 24 * 180; // Old messages purge interval = 60 seconds * 60 minutes * 24 hours * 180 days
+const NSTimeInterval SEVEN_DAYS = 60 * 60 * 24 * 7; // Old messages purged on migration = 60 seconds * 60 minutes * 24 hours * 7 days
+const NSTimeInterval NINETY_DAYS = 60 * 60 * 24 * 90; // Old messages purge interval = 60 seconds * 60 minutes * 24 hours * 90 days
 
 // Interval between uploads if not specified
 const NSTimeInterval DEFAULT_DEBUG_UPLOAD_INTERVAL =
@@ -286,7 +271,9 @@ const NSTimeInterval DEFAULT_UPLOAD_INTERVAL =
         600.0;
     #endif
 
-const NSUInteger EVENT_LIMIT = 1000; // maximum number of events per session
+// How long to block config requests after a successful response.
+const NSTimeInterval DEBUG_CONFIG_REQUESTS_QUIET_INTERVAL = 60.0;
+const NSTimeInterval CONFIG_REQUESTS_QUIET_INTERVAL = 10.0*60;
 
 // Attributes limits
 const NSInteger LIMIT_ATTR_COUNT = 100;

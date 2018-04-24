@@ -1,21 +1,3 @@
-//
-//  mParticle.m
-//
-//  Copyright 2016 mParticle, Inc.
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
-
 #import "mParticle.h"
 #import "MPAppNotificationHandler.h"
 #import "MPBackendController.h"
@@ -38,9 +20,9 @@
 #import "MPSession.h"
 #import "MPStateMachine.h"
 #import "MPUserSegments+Setters.h"
-#import "NSURLSession+mParticle.h"
-#import "NSUserDefaults+mParticle.h"
+#import "MPIUserDefaults.h"
 #import "MPConvertJS.h"
+#import "MPIdentityApi.h"
 
 #if TARGET_OS_IOS == 1
     #import "MPLocationManager.h"
@@ -58,6 +40,10 @@ NSString *const kMParticleFirstRun = @"firstrun";
 NSString *const kMPMethodName = @"$MethodName";
 NSString *const kMPStateKey = @"state";
 
+@interface MPKitContainer ()
+- (BOOL)kitsInitialized;
+@end
+
 @interface MParticle() <MPBackendControllerDelegate> {
 #if defined(MP_CRASH_REPORTER) && TARGET_OS_IOS == 1
     MPExceptionHandler *exceptionHandler;
@@ -67,9 +53,61 @@ NSString *const kMPStateKey = @"state";
 }
 
 @property (nonatomic, strong, nonnull) MPBackendController *backendController;
+@property (nonatomic, strong, nonnull) MParticleOptions *options;
 @property (nonatomic, strong, nullable) NSMutableDictionary *configSettings;
 @property (nonatomic, strong, nullable) MPKitActivity *kitActivity;
 @property (nonatomic, unsafe_unretained) BOOL initialized;
+@property (nonatomic, strong, nonnull) NSMutableArray *kitsInitializedBlocks;
+
+
+@end
+
+@interface MPAttributionResult ()
+
+@property (nonatomic, readwrite) NSNumber *kitCode;
+@property (nonatomic, readwrite) NSString *kitName;
+
+@end
+
+@implementation MPAttributionResult
+
+- (NSString *)description {
+    NSMutableString *description = [[NSMutableString alloc] initWithString:@"MPAttributionResult {\n"];
+    [description appendFormat:@"  kitCode: %@\n", _kitCode];
+    [description appendFormat:@"  kitName: %@\n", _kitName];
+    [description appendFormat:@"  linkInfo: %@\n", _linkInfo];
+    [description appendString:@"}"];
+    return description;
+}
+
+@end
+
+@implementation MParticleOptions
+
+- (instancetype)init
+{
+    self = [super init];
+    if (self) {
+        _proxyAppDelegate = YES;
+        _collectUserAgent = YES;
+        _automaticSessionTracking = YES;
+        _startKitsAsync = NO;
+    }
+    return self;
+}
+
++ (id)optionsWithKey:(NSString *)apiKey secret:(NSString *)secret {
+    MParticleOptions *options = [[self alloc] init];
+    options.apiKey = apiKey;
+    options.apiSecret = secret;
+    return options;
+}
+
+@end
+
+@interface MPBackendController ()
+
+- (NSMutableArray<NSDictionary<NSString *, id> *> *)userIdentitiesForUserId:(NSNumber *)userId;
 
 @end
 
@@ -77,6 +115,7 @@ NSString *const kMPStateKey = @"state";
 @implementation MParticle
 
 @synthesize commerce = _commerce;
+@synthesize identity = _identity;
 @synthesize optOut = _optOut;
 
 + (void)initialize {
@@ -93,6 +132,8 @@ NSString *const kMPStateKey = @"state";
     isLoggingUncaughtExceptions = NO;
     _initialized = NO;
     _kitActivity = [[MPKitActivity alloc] init];
+    _kitsInitializedBlocks = [NSMutableArray array];
+    _automaticSessionTracking = YES;
     
     [self addObserver:self forKeyPath:@"backendController.session" options:NSKeyValueObservingOptionNew context:NULL];
     
@@ -188,7 +229,6 @@ NSString *const kMPStateKey = @"state";
 }
 
 - (void)handleApplicationWillTerminate:(NSNotification *)notification {
-    [NSURLSession freeResources];
 }
 
 #pragma mark MPBackendControllerDelegate methods
@@ -234,8 +274,13 @@ NSString *const kMPStateKey = @"state";
 }
 
 #pragma mark - Public accessors and methods
-- (MPBags *)bags {
-    return [MPStateMachine sharedInstance].bags;
+- (MPIdentityApi *)identity {
+    if (_identity) {
+        return _identity;
+    }
+    
+    _identity = [[MPIdentityApi alloc] init];
+    return _identity;
 }
 
 - (MPCommerce *)commerce {
@@ -284,13 +329,7 @@ NSString *const kMPStateKey = @"state";
 }
 
 - (void)setLogLevel:(MPILogLevel)logLevel {
-    if ([MPStateMachine environment] == MPEnvironmentDevelopment) {
-        [MPStateMachine sharedInstance].logLevel = logLevel;
-    }
-}
-
-- (BOOL)measuringNetworkPerformance {
-    return [NSURLSession methodsSwizzled];
+    [MPStateMachine sharedInstance].logLevel = logLevel;
 }
 
 - (BOOL)optOut {
@@ -359,8 +398,8 @@ NSString *const kMPStateKey = @"state";
 #endif
 }
 
-- (nullable NSDictionary <NSString *, id> *)userAttributes {
-    NSDictionary *userAttributes = [self.backendController.userAttributes copy];
+- (NSDictionary<NSString *, id> *)userAttributesForUserId:(NSNumber *)userId {
+    NSDictionary *userAttributes = [[self.backendController userAttributesForUserId:userId] copy];
     return userAttributes;
 }
 
@@ -397,18 +436,28 @@ NSString *const kMPStateKey = @"state";
         return;
     }
 
-    [self startWithKey:apiKey secret:secret installationType:MPInstallationTypeAutodetect environment:MPEnvironmentAutoDetect proxyAppDelegate:YES];
+    MParticleOptions *options = [[MParticleOptions alloc] init];
+    options.apiKey = apiKey;
+    options.apiSecret = secret;
+    options.automaticSessionTracking = [self.configSettings[kMPConfigSharedGroupID] boolValue];
+    options.customUserAgent = self.configSettings[kMPConfigCustomUserAgent];
+    options.collectUserAgent = [self.configSettings[kMPConfigCollectUserAgent] boolValue];
+    options.installType = MPInstallationTypeAutodetect;
+    options.environment = MPEnvironmentAutoDetect;
+    options.proxyAppDelegate = YES;
+    [self startWithOptions:options];
 }
 
-- (void)startWithKey:(NSString *)apiKey secret:(NSString *)secret {
-    [self startWithKey:apiKey secret:secret installationType:MPInstallationTypeAutodetect environment:MPEnvironmentAutoDetect proxyAppDelegate:YES];
-}
+- (void)startWithOptions:(MParticleOptions *)options {
+    self.options = options;
+    
+    NSString *apiKey = options.apiKey;
+    NSString *secret = options.apiSecret;
+    MPInstallationType installationType = options.installType;
+    MPEnvironment environment = options.environment;
+    BOOL proxyAppDelegate = options.proxyAppDelegate;
+    BOOL startKitsAsync = options.startKitsAsync;
 
-- (void)startWithKey:(NSString *)apiKey secret:(NSString *)secret installationType:(MPInstallationType)installationType environment:(MPEnvironment)environment {
-    [self startWithKey:apiKey secret:secret installationType:installationType environment:environment proxyAppDelegate:YES];
-}
-
-- (void)startWithKey:(NSString *)apiKey secret:(NSString *)secret installationType:(MPInstallationType)installationType environment:(MPEnvironment)environment proxyAppDelegate:(BOOL)proxyAppDelegate {
     NSAssert(apiKey && secret, @"mParticle SDK must be started with an apiKey and secret.");
     NSAssert([apiKey isKindOfClass:[NSString class]] && [secret isKindOfClass:[NSString class]], @"mParticle SDK apiKey and secret must be of type string.");
     NSAssert(apiKey.length > 0 && secret.length > 0, @"mParticle SDK apiKey and secret cannot be an empty string.");
@@ -419,27 +468,37 @@ NSString *const kMPStateKey = @"state";
     }
     
     __weak MParticle *weakSelf = self;
-    NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
-    BOOL firstRun = userDefaults[kMParticleFirstRun] == nil;
-    BOOL registerForSilentNotifications = YES;
+    MPIUserDefaults *userDefaults = [MPIUserDefaults standardUserDefaults];
+    BOOL firstRun = [userDefaults mpObjectForKey:kMParticleFirstRun userId:[MPPersistenceController mpId]] == nil;
     _proxiedAppDelegate = proxyAppDelegate;
+    _automaticSessionTracking = self.options.automaticSessionTracking;
+    _customUserAgent = self.options.customUserAgent;
+    _collectUserAgent = self.options.collectUserAgent;
     
-    if (self.configSettings) {
-        NSNumber *configRegisterForSilentNotifications = self.configSettings[kMPConfigRegisterForSilentNotifications];
-        
-        if (configRegisterForSilentNotifications) {
-            registerForSilentNotifications = [configRegisterForSilentNotifications boolValue];
-        }
+    id currentIdentifier = userDefaults[kMPUserIdentitySharedGroupIdentifier];
+    if (options.sharedGroupID == currentIdentifier) {
+        // Do nothing, we only want to update NSUserDefaults on a change
+    } else if (options.sharedGroupID && ![options.sharedGroupID isEqualToString:@""]) {
+        [userDefaults migrateToSharedGroupIdentifier:options.sharedGroupID];
+    } else {
+        [userDefaults migrateFromSharedGroupIdentifier];
     }
 
+    if (environment == MPEnvironmentDevelopment) {
+        MPILogWarning(@"SDK has been initialized in Development mode.");
+    } else if (environment == MPEnvironmentProduction) {
+        MPILogWarning(@"SDK has been initialized in Production Mode.");
+    }
+    
     [MPStateMachine setEnvironment:environment];
+    [MPStateMachine sharedInstance].automaticSessionTracking = options.automaticSessionTracking;
 
     [self.backendController startWithKey:apiKey
                                   secret:secret
                                 firstRun:firstRun
                         installationType:installationType
                         proxyAppDelegate:proxyAppDelegate
-          registerForSilentNotifications:registerForSilentNotifications
+                          startKitsAsync:startKitsAsync
                        completionHandler:^{
                            __strong MParticle *strongSelf = weakSelf;
                            
@@ -447,8 +506,26 @@ NSString *const kMPStateKey = @"state";
                                return;
                            }
                            
+                           MPIdentityApiRequest *identifyRequest = nil;
+                           if (options.identifyRequest) {
+                               identifyRequest = options.identifyRequest;
+                           }
+                           else {
+                               MParticleUser *user = [MParticle sharedInstance].identity.currentUser;
+                               identifyRequest = [MPIdentityApiRequest requestWithUser:user];
+                           }
+                           
+                           [strongSelf.identity identify:identifyRequest completion:^(MPIdentityApiResult * _Nullable apiResult, NSError * _Nullable error) {
+                               if (error) {
+                                   MPILogError(@"Identify request failed with error: %@", error);
+                               }
+                               if (options.onIdentifyComplete) {
+                                   options.onIdentifyComplete(apiResult, error);
+                               }
+                           }];
+                           
                            if (firstRun) {
-                               userDefaults[kMParticleFirstRun] = @NO;
+                               [userDefaults setMPObject:@NO forKey:kMParticleFirstRun userId:[MPPersistenceController mpId]];
                                [userDefaults synchronize];
                            }
 
@@ -456,6 +533,7 @@ NSString *const kMPStateKey = @"state";
                            strongSelf->privateOptOut = @(strongSelf->_optOut);
                            
                            if (strongSelf.configSettings) {
+                               
                                if (strongSelf.configSettings[kMPConfigSessionTimeout]) {
                                    strongSelf.sessionTimeout = [strongSelf.configSettings[kMPConfigSessionTimeout] doubleValue];
                                }
@@ -489,6 +567,7 @@ NSString *const kMPStateKey = @"state";
 
 #pragma mark Application notifications
 #if TARGET_OS_IOS == 1
+#if !defined(MPARTICLE_APP_EXTENSIONS)
 - (NSData *)pushNotificationToken {
     return [MPNotificationController deviceToken];
 }
@@ -497,7 +576,10 @@ NSString *const kMPStateKey = @"state";
     [MPNotificationController setDeviceToken:pushNotificationToken];
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 - (void)didReceiveLocalNotification:(UILocalNotification *)notification {
+#pragma clang diagnostic pop
     NSDictionary *userInfo = [MPNotificationController dictionaryFromLocalNotification:notification];
     if (userInfo && !self.proxiedAppDelegate) {
         [[MPAppNotificationHandler sharedInstance] receivedUserNotification:userInfo actionIdentifier:nil userNotificationMode:MPUserNotificationModeLocal];
@@ -528,7 +610,10 @@ NSString *const kMPStateKey = @"state";
     [[MPAppNotificationHandler sharedInstance] didRegisterForRemoteNotificationsWithDeviceToken:deviceToken];
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 - (void)handleActionWithIdentifier:(NSString *)identifier forLocalNotification:(UILocalNotification *)notification {
+#pragma clang diagnostic pop
     NSDictionary *userInfo = [MPNotificationController dictionaryFromLocalNotification:notification];
     if (userInfo && !self.proxiedAppDelegate) {
         [[MPAppNotificationHandler sharedInstance] receivedUserNotification:userInfo actionIdentifier:identifier userNotificationMode:MPUserNotificationModeLocal];
@@ -542,6 +627,7 @@ NSString *const kMPStateKey = @"state";
     
     [[MPAppNotificationHandler sharedInstance] handleActionWithIdentifier:identifier forRemoteNotification:userInfo];
 }
+#endif
 #endif
 
 - (void)openURL:(NSURL *)url sourceApplication:(NSString *)sourceApplication annotation:(id)annotation {
@@ -730,11 +816,9 @@ NSString *const kMPStateKey = @"state";
     [self logScreenEvent:event];
 }
 
-#pragma mark Deep linking
-- (void)checkForDeferredDeepLinkWithCompletionHandler:(void(^)(NSDictionary * linkInfo, NSError *error))completionHandler {
-    [[MPKitContainer sharedInstance] forwardSDKCall:@selector(checkForDeferredDeepLinkWithCompletionHandler:) kitHandler:^(id<MPKitProtocol> _Nonnull kit, MPKitExecStatus * __autoreleasing  _Nonnull * _Nonnull execStatus) {
-        [kit checkForDeferredDeepLinkWithCompletionHandler:completionHandler];
-    }];
+#pragma mark Attribution
+- (nullable NSDictionary<NSNumber *, MPAttributionResult *> *)attributionInfo {
+    return [[MPKitContainer sharedInstance].attributionInfo copy];
 }
 
 #pragma mark Error, Exception, and Crash Handling
@@ -996,8 +1080,8 @@ NSString *const kMPStateKey = @"state";
 - (nonnull MPKitExecStatus *)setIntegrationAttributes:(nonnull NSDictionary<NSString *, NSString *> *)attributes forKit:(nonnull NSNumber *)kitCode {
     __block MPKitReturnCode returnCode = MPKitReturnCodeSuccess;
     
-    if (self.backendController.initializationStatus != MPInitializationStatusStarted) {
-        MPILogError(@"Cannot set integration attributes. mParticle SDK is not initialized yet.");
+    if (self.backendController.initializationStatus == MPInitializationStatusNotStarted) {
+        MPILogError(@"Cannot set integration attributes. mParticle SDK is not started yet.");
         returnCode = MPKitReturnCodeCannotExecute;
     }
 
@@ -1016,8 +1100,8 @@ NSString *const kMPStateKey = @"state";
     MPKitReturnCode returnCode = MPKitReturnCodeSuccess;
     BOOL validKitCode = [MPKitInstanceValidator isValidKitCode:kitCode];
     
-    if (self.backendController.initializationStatus != MPInitializationStatusStarted) {
-        MPILogError(@"Cannot clear integration attributes. mParticle SDK is not initialized yet.");
+    if (self.backendController.initializationStatus == MPInitializationStatusNotStarted) {
+        MPILogError(@"Cannot clear integration attributes. mParticle SDK is not started yet.");
         returnCode = MPKitReturnCodeCannotExecute;
     }
 
@@ -1031,6 +1115,23 @@ NSString *const kMPStateKey = @"state";
 }
 
 #pragma mark Kits
+
+- (void)onKitsInitialized:(void(^)(void))block {
+    BOOL kitsInitialized = [MPKitContainer sharedInstance].kitsInitialized;
+    if (kitsInitialized) {
+        block();
+    } else {
+        [self.kitsInitializedBlocks addObject:[block copy]];
+    }
+}
+
+- (void)executeKitsInitializedBlocks {
+    [self.kitsInitializedBlocks enumerateObjectsUsingBlock:^(void (^block)(void), NSUInteger idx, BOOL * _Nonnull stop) {
+        block();
+    }];
+    [self.kitsInitializedBlocks removeAllObjects];
+}
+
 - (BOOL)isKitActive:(nonnull NSNumber *)kitCode {
     BOOL isValidKitCode = [kitCode isKindOfClass:[NSNumber class]] && [MPKitInstanceValidator isValidKitCode:kitCode];
     NSAssert(isValidKitCode, @"The value in kitCode is not valid. See MPKitInstance.");
@@ -1132,43 +1233,6 @@ NSString *const kMPStateKey = @"state";
 }
 #endif
 
-#pragma mark Network performance
-- (void)beginMeasuringNetworkPerformance {
-    if (self.backendController.initializationStatus == MPInitializationStatusStarted) {
-        if ([[MPStateMachine sharedInstance].networkPerformanceMeasuringMode isEqualToString:kMPRemoteConfigForceFalse]) {
-            return;
-        }
-        
-        [NSURLSession swizzleMethods];
-    } else if (self.backendController.initializationStatus == MPInitializationStatusStarting) {
-        __weak MParticle *weakSelf = self;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong MParticle *strongSelf = weakSelf;
-            [strongSelf beginMeasuringNetworkPerformance];
-        });
-    }
-}
-
-- (void)endMeasuringNetworkPerformance {
-    if (self.backendController.initializationStatus == MPInitializationStatusStarted) {
-        if ([[MPStateMachine sharedInstance].networkPerformanceMeasuringMode isEqualToString:kMPRemoteConfigForceTrue]) {
-            return;
-        }
-        
-        [NSURLSession restoreMethods];
-    } else if (self.backendController.initializationStatus == MPInitializationStatusStarting) {
-        __weak MParticle *weakSelf = self;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong MParticle *strongSelf = weakSelf;
-            [strongSelf endMeasuringNetworkPerformance];
-        });
-    }
-}
-
-- (void)excludeURLFromNetworkPerformanceMeasuring:(NSURL *)url {
-    [NSURLSession excludeURLFromNetworkPerformanceMeasuring:url];
-}
-
 - (void)logNetworkPerformance:(NSString *)urlString httpMethod:(NSString *)httpMethod startTime:(NSTimeInterval)startTime duration:(NSTimeInterval)duration bytesSent:(NSUInteger)bytesSent bytesReceived:(NSUInteger)bytesReceived {
     NSURL *url = [NSURL URLWithString:urlString];
     NSURLRequest *urlRequest = [NSURLRequest requestWithURL:url];
@@ -1194,14 +1258,6 @@ NSString *const kMPStateKey = @"state";
                                                    MPILogError(@"Could not log network performance measurement\n Reason: %@", [strongSelf.backendController execStatusDescription:execStatus]);
                                                }
                                            }];
-}
-
-- (void)preserveQueryMeasuringNetworkPerformance:(NSString *)queryString {
-    [NSURLSession preserveQueryMeasuringNetworkPerformance:queryString];
-}
-
-- (void)resetNetworkPerformanceExclusionsAndFilters {
-    [NSURLSession resetNetworkPerformanceExclusionsAndFilters];
 }
 
 #pragma mark Session management
@@ -1240,7 +1296,7 @@ NSString *const kMPStateKey = @"state";
     dispatch_async(dispatch_get_main_queue(), ^{
         __strong MParticle *strongSelf = weakSelf;
         
-        MPExecStatus execStatus = [strongSelf.backendController uploadWithCompletionHandler:nil];
+        MPExecStatus execStatus = [strongSelf.backendController uploadDatabaseWithCompletionHandler:nil];
         
         if (execStatus == MPExecStatusSuccess) {
             MPILogDebug(@"Forcing Upload");
@@ -1259,7 +1315,7 @@ NSString *const kMPStateKey = @"state";
     }
     
     NSMutableDictionary *userAttributes = nil;
-    NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
+    MPIUserDefaults *userDefaults = [MPIUserDefaults standardUserDefaults];
     NSDictionary *savedUserAttributes = userDefaults[kMPUserAttributeKey];
     if (savedUserAttributes) {
         userAttributes = [[NSMutableDictionary alloc] initWithCapacity:savedUserAttributes.count];
@@ -1293,31 +1349,6 @@ NSString *const kMPStateKey = @"state";
 }
 
 #pragma mark User Identity
-- (NSNumber *)incrementUserAttribute:(NSString *)key byValue:(NSNumber *)value {
-    if (!_backendController || _backendController.initializationStatus != MPInitializationStatusStarted) {
-        MPILogError(@"Cannot increment user attribute. SDK is not initialized yet.");
-        return nil;
-    }
-    
-    MPStateMachine *stateMachine = [MPStateMachine sharedInstance];
-    if (stateMachine.optOut) {
-        return nil;
-    }
-    
-    NSNumber *newValue = [self.backendController incrementUserAttribute:key byValue:value];
-    
-    MPILogDebug(@"User attribute %@ incremented by %@. New value: %@", key, value, newValue);
-    
-    [[MPKitContainer sharedInstance] forwardSDKCall:@selector(incrementUserAttribute:byValue:)
-                                   userAttributeKey:key
-                                              value:value
-                                         kitHandler:^(id<MPKitProtocol> kit) {
-                                             [kit incrementUserAttribute:key byValue:value];
-                                         }];
-    
-    return newValue;
-}
-
 - (void)logout {
     __weak MParticle *weakSelf = self;
     
@@ -1345,184 +1376,6 @@ NSString *const kMPStateKey = @"state";
                         }];
 }
 
-- (void)setUserAttribute:(NSString *)key value:(id)value {
-    __weak MParticle *weakSelf = self;
-    
-    [self.backendController setUserAttribute:key
-                                       value:value
-                                     attempt:0
-                           completionHandler:^(NSString *key, id value, MPExecStatus execStatus) {
-                               __strong MParticle *strongSelf = weakSelf;
-                               
-                               if (execStatus == MPExecStatusSuccess) {
-                                   if (value) {
-                                       MPILogDebug(@"Set user attribute - %@:%@", key, value);
-                                   } else {
-                                       MPILogDebug(@"Reset user attribute - %@", key);
-                                   }
-                                   
-                                   // Forwarding calls to kits
-                                   if ((value == nil) || [value isKindOfClass:[NSString class]]) {
-                                       if (((NSString *)value).length > 0) {
-                                           [[MPKitContainer sharedInstance] forwardSDKCall:@selector(setUserAttribute:value:)
-                                                                          userAttributeKey:key
-                                                                                     value:value
-                                                                                kitHandler:^(id<MPKitProtocol> kit) {
-                                                                                    [kit setUserAttribute:key value:value];
-                                                                                }];
-                                       } else {
-                                           [[MPKitContainer sharedInstance] forwardSDKCall:@selector(removeUserAttribute:)
-                                                                          userAttributeKey:key
-                                                                                     value:value
-                                                                                kitHandler:^(id<MPKitProtocol> kit) {
-                                                                                    [kit removeUserAttribute:key];
-                                                                                }];
-                                       }
-                                   } else {
-                                       [[MPKitContainer sharedInstance] forwardSDKCall:@selector(setUserAttribute:value:)
-                                                                      userAttributeKey:key
-                                                                                 value:value
-                                                                            kitHandler:^(id<MPKitProtocol> kit) {
-                                                                                [kit setUserAttribute:key value:value];
-                                                                            }];
-                                   }
-                               } else if (execStatus == MPExecStatusDelayedExecution) {
-                                   MPILogWarning(@"Delayed set user attribute: %@\n Reason: %@", key, [strongSelf.backendController execStatusDescription:execStatus]);
-                               } else if (execStatus != MPExecStatusContinuedDelayedExecution) {
-                                   MPILogError(@"Could not set user attribute - %@:%@\n Reason: %@", key, value, [strongSelf.backendController execStatusDescription:execStatus]);
-                               }
-                           }];
-}
-
-- (void)setUserAttribute:(nonnull NSString *)key values:(nullable NSArray<NSString *> *)values {
-    __weak MParticle *weakSelf = self;
-    
-    [self.backendController setUserAttribute:key
-                                      values:values
-                                     attempt:0
-                           completionHandler:^(NSString *key, NSArray *values, MPExecStatus execStatus) {
-                               __strong MParticle *strongSelf = weakSelf;
-                               
-                               if (execStatus == MPExecStatusSuccess) {
-                                   if (values) {
-                                       MPILogDebug(@"Set user attribute values - %@:%@", key, values);
-                                   } else {
-                                       MPILogDebug(@"Reset user attribute - %@", key);
-                                   }
-                                   
-                                   // Forwarding calls to kits
-                                   if (values) {
-                                       SEL setUserAttributeSelector = @selector(setUserAttribute:value:);
-                                       SEL setUserAttributeListSelector = @selector(setUserAttribute:values:);
-
-                                       [[MPKitContainer sharedInstance] forwardSDKCall:setUserAttributeListSelector
-                                                                      userAttributeKey:key
-                                                                                 value:values
-                                                                            kitHandler:^(id<MPKitProtocol> kit) {
-                                                                                if ([kit respondsToSelector:setUserAttributeListSelector]) {
-                                                                                    [kit setUserAttribute:key values:values];
-                                                                                } else if ([kit respondsToSelector:setUserAttributeSelector]) {
-                                                                                    NSString *csvValues = [values componentsJoinedByString:@","];
-                                                                                    [kit setUserAttribute:key value:csvValues];
-                                                                                }
-                                                                            }];
-                                   } else {
-                                       [[MPKitContainer sharedInstance] forwardSDKCall:@selector(removeUserAttribute:)
-                                                                      userAttributeKey:key
-                                                                                 value:values
-                                                                            kitHandler:^(id<MPKitProtocol> kit) {
-                                                                                [kit removeUserAttribute:key];
-                                                                            }];
-                                   }
-                               } else if (execStatus == MPExecStatusDelayedExecution) {
-                                   MPILogWarning(@"Delayed set user attribute values: %@\n Reason: %@", key, [strongSelf.backendController execStatusDescription:execStatus]);
-                               } else if (execStatus != MPExecStatusContinuedDelayedExecution) {
-                                   MPILogError(@"Could not set user attribute values - %@:%@\n Reason: %@", key, values, [strongSelf.backendController execStatusDescription:execStatus]);
-                               }
-                           }];
-}
-
-- (void)setUserIdentity:(NSString *)identityString identityType:(MPUserIdentity)identityType {
-    __weak MParticle *weakSelf = self;
-    
-    [self.backendController setUserIdentity:identityString
-                               identityType:identityType
-                                    attempt:0
-                          completionHandler:^(NSString *identityString, MPUserIdentity identityType, MPExecStatus execStatus) {
-                              __strong MParticle *strongSelf = weakSelf;
-                              
-                              if (execStatus == MPExecStatusSuccess) {
-                                  MPILogDebug(@"Set user identity: %@", identityString);
-                                  
-                                  // Forwarding calls to kits
-                                  [[MPKitContainer sharedInstance] forwardSDKCall:@selector(setUserIdentity:identityType:)
-                                                                     userIdentity:identityString
-                                                                     identityType:identityType
-                                                                       kitHandler:^(id<MPKitProtocol> kit) {
-                                                                           [kit setUserIdentity:identityString identityType:identityType];
-                                                                       }];
-                              } else if (execStatus == MPExecStatusDelayedExecution) {
-                                  MPILogWarning(@"Delayed set user identity: %@\n Reason: %@", identityString, [strongSelf.backendController execStatusDescription:execStatus]);
-                              } else if (execStatus != MPExecStatusContinuedDelayedExecution) {
-                                  MPILogError(@"Could not set user identity: %@\n Reason: %@", identityString, [strongSelf.backendController execStatusDescription:execStatus]);
-                              }
-                          }];
-}
-
-- (void)setUserTag:(NSString *)tag {
-    __weak MParticle *weakSelf = self;
-    
-    [self.backendController setUserAttribute:tag
-                                       value:nil
-                                     attempt:0
-                           completionHandler:^(NSString *key, id value, MPExecStatus execStatus) {
-                               __strong MParticle *strongSelf = weakSelf;
-                               
-                               if (execStatus == MPExecStatusSuccess) {
-                                   MPILogDebug(@"Set user tag - %@", tag);
-                                   
-                                   // Forwarding calls to kits
-                                   [[MPKitContainer sharedInstance] forwardSDKCall:@selector(setUserTag:)
-                                                                  userAttributeKey:tag
-                                                                             value:nil
-                                                                        kitHandler:^(id<MPKitProtocol> kit) {
-                                                                            [kit setUserTag:tag];
-                                                                        }];
-                               } else if (execStatus == MPExecStatusDelayedExecution) {
-                                   MPILogWarning(@"Delayed set user tag: %@\n Reason: %@", key, [strongSelf.backendController execStatusDescription:execStatus]);
-                               } else if (execStatus != MPExecStatusContinuedDelayedExecution) {
-                                   MPILogError(@"Could not set user tag - %@\n Reason: %@", key, [strongSelf.backendController execStatusDescription:execStatus]);
-                               }
-                           }];
-}
-
-- (void)removeUserAttribute:(NSString *)key {
-    __weak MParticle *weakSelf = self;
-    
-    [self.backendController setUserAttribute:key
-                                       value:@""
-                                     attempt:0
-                           completionHandler:^(NSString *key, id value, MPExecStatus execStatus) {
-                               __strong MParticle *strongSelf = weakSelf;
-                               
-                               if (execStatus == MPExecStatusSuccess) {
-                                   MPILogDebug(@"Removed user attribute - %@", key);
-                                   
-                                   // Forwarding calls to kits
-                                   [[MPKitContainer sharedInstance] forwardSDKCall:_cmd
-                                                                  userAttributeKey:key
-                                                                             value:nil
-                                                                        kitHandler:^(id<MPKitProtocol> kit) {
-                                                                            [kit removeUserAttribute:key];
-                                                                        }];
-                               } else if (execStatus == MPExecStatusDelayedExecution) {
-                                   MPILogWarning(@"Delayed removing user attribute: %@\n Reason: %@", key, [strongSelf.backendController execStatusDescription:execStatus]);
-                               } else if (execStatus != MPExecStatusContinuedDelayedExecution) {
-                                   MPILogError(@"Could not remove user attribute - %@\n Reason: %@", key, [strongSelf.backendController execStatusDescription:execStatus]);
-                               }
-                           }];
-}
-
 #pragma mark User Notifications
 #if TARGET_OS_IOS == 1 && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
 - (void)userNotificationCenter:(UNUserNotificationCenter *)center willPresentNotification:(UNNotification *)notification {
@@ -1533,27 +1386,6 @@ NSString *const kMPStateKey = @"state";
     [[MPAppNotificationHandler sharedInstance] userNotificationCenter:center didReceiveNotificationResponse:response];
 }
 #endif
-
-#pragma mark User Segments
-- (void)userSegments:(NSTimeInterval)timeout endpointId:(NSString *)endpointId completionHandler:(MPUserSegmentsHandler)completionHandler {
-    MPExecStatus execStatus = [self.backendController fetchSegments:timeout
-                                                         endpointId:endpointId
-                                                  completionHandler:^(NSArray *segments, NSTimeInterval elapsedTime, NSError *error) {
-                                                      if (!segments) {
-                                                          completionHandler(nil, error);
-                                                          return;
-                                                      }
-                                                      
-                                                      MPUserSegments *userSegments = [[MPUserSegments alloc] initWithSegments:segments];
-                                                      completionHandler(userSegments, error);
-                                                  }];
-    
-    if (execStatus == MPExecStatusSuccess) {
-        MPILogDebug(@"Fetching user segments");
-    } else {
-        MPILogError(@"Could not fetch user segments: %@", [self.backendController execStatusDescription:execStatus]);
-    }
-}
 
 #pragma mark Web Views
 #if TARGET_OS_IOS == 1
@@ -1612,17 +1444,60 @@ NSString *const kMPStateKey = @"state";
                 default:
                     break;
             }
-        } else if ([hostPath hasPrefix:kMParticleWebViewPathSetUserIdentity]) {
-            [self setUserIdentity:eventDictionary[@"Identity"] identityType:(MPUserIdentity)[eventDictionary[@"Type"] integerValue]];
+        } else if ([hostPath hasPrefix:kMParticleWebViewPathIdentify]) {
+            MPIdentityApiRequest *request = [MPConvertJS MPIdentityApiRequest:eventDictionary];
+            
+            if (!request) {
+                MPILogError(@"Unable to create identify request from webview JS dictionary: %@", eventDictionary);
+                return;
+            }
+            
+            [[MParticle sharedInstance].identity identify:request completion:^(MPIdentityApiResult * _Nullable apiResult, NSError * _Nullable error) {
+                
+            }];
+            
+            
+        } else if ([hostPath hasPrefix:kMParticleWebViewPathLogin]) {
+            MPIdentityApiRequest *request = [MPConvertJS MPIdentityApiRequest:eventDictionary];
+            
+            if (!request) {
+                MPILogError(@"Unable to create login request from webview JS dictionary: %@", eventDictionary);
+                return;
+            }
+            
+            [[MParticle sharedInstance].identity login:request completion:^(MPIdentityApiResult * _Nullable apiResult, NSError * _Nullable error) {
+                
+            }];
+        } else if ([hostPath hasPrefix:kMParticleWebViewPathLogout]) {
+            MPIdentityApiRequest *request = [MPConvertJS MPIdentityApiRequest:eventDictionary];
+            
+            if (!request) {
+                MPILogError(@"Unable to create logout request from webview JS dictionary: %@", eventDictionary);
+                return;
+            }
+            
+            [[MParticle sharedInstance].identity logout:request completion:^(MPIdentityApiResult * _Nullable apiResult, NSError * _Nullable error) {
+                
+            }];
+        } else if ([hostPath hasPrefix:kMParticleWebViewPathModify]) {
+            MPIdentityApiRequest *request = [MPConvertJS MPIdentityApiRequest:eventDictionary];
+            
+            if (!request) {
+                MPILogError(@"Unable to create modify request from webview JS dictionary: %@", eventDictionary);
+                return;
+            }
+            
+            [[MParticle sharedInstance].identity modify:request completion:^(MPIdentityApiResult * _Nullable apiResult, NSError * _Nullable error) {
+                
+            }];
         } else if ([hostPath hasPrefix:kMParticleWebViewPathSetUserTag]) {
-            [self setUserTag:eventDictionary[@"key"]];
+            [self.identity.currentUser setUserTag:eventDictionary[@"key"]];
         } else if ([hostPath hasPrefix:kMParticleWebViewPathRemoveUserTag]) {
-            //TODO: implement removeUserTag
-            //[self removeUserTag:eventDictionary[@"key"]];
+            [self.identity.currentUser removeUserAttribute:eventDictionary[@"key"]];
         } else if ([hostPath hasPrefix:kMParticleWebViewPathSetUserAttribute]) {
-            [self setUserAttribute:eventDictionary[@"key"] value:eventDictionary[@"value"]];
+            [self.identity.currentUser setUserAttribute:eventDictionary[@"key"] value:eventDictionary[@"value"]];
         } else if ([hostPath hasPrefix:kMParticleWebViewPathRemoveUserAttribute]) {
-            [self setUserAttribute:eventDictionary[@"key"] value:nil];
+            [self.identity.currentUser setUserAttribute:eventDictionary[@"key"] value:nil];
         } else if ([hostPath hasPrefix:kMParticleWebViewPathSetSessionAttribute]) {
             [self setSessionAttribute:eventDictionary[@"key"] value:eventDictionary[@"value"]];
         }

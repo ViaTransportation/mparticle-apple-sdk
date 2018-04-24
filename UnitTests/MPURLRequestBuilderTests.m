@@ -1,21 +1,3 @@
-//
-//  MPURLRequestBuilderTests.m
-//
-//  Copyright 2016 mParticle, Inc.
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
-
 #import <XCTest/XCTest.h>
 #import "MPURLRequestBuilder.h"
 #import "MPStateMachine.h"
@@ -23,17 +5,20 @@
 #import "MPConsumerInfo.h"
 #import "MPNetworkCommunication.h"
 #import "MPNetworkCommunication+Tests.h"
-#import "MPStandaloneMessage.h"
 #import "MPKitRegister.h"
 #import "MPKitContainer.h"
 #import "MPKitTestClass.h"
-#import "NSUserDefaults+mParticle.h"
+#import "MPIUserDefaults.h"
+#import "MPPersistenceController.h"
+#import "MPMessage.h"
 
 #pragma mark - MPURLRequestBuilder category
 @interface MPURLRequestBuilder(Tests)
 
 - (NSString *)hmacSha256Encode:(NSString *const)message key:(NSString *const)key;
 - (NSString *)userAgent;
+- (void)setUserAgent:(NSString *const)userAgent;
+- (NSString *)fallbackUserAgent;
 
 @end
 
@@ -52,10 +37,11 @@
     stateMachine.secret = @"unit_test_secret";
     
     if (![MPKitContainer registeredKits]) {
-        MPKitRegister *kitRegister = [[MPKitRegister alloc] initWithName:@"KitTest" className:@"MPKitTestClass" startImmediately:NO];
-        kitRegister.wrapperInstance = [[NSClassFromString(kitRegister.className) alloc] initWithConfiguration:@{@"appKey":@"🔑"} startImmediately:YES];
+        MPKitRegister *kitRegister = [[MPKitRegister alloc] initWithName:@"KitTest" className:@"MPKitTestClassNoStartImmediately"];
+        kitRegister.wrapperInstance = [[NSClassFromString(kitRegister.className) alloc] init];
+        [kitRegister.wrapperInstance didFinishLaunchingWithConfiguration:@{@"appKey":@"🔑"}];
         [MPKitContainer registerKit:kitRegister];
-        kitRegister = [[MPKitRegister alloc] initWithName:@"KitSecondTest" className:@"MPKitSecondTestClass" startImmediately:YES];
+        kitRegister = [[MPKitRegister alloc] initWithName:@"KitSecondTest" className:@"MPKitSecondTestClass"];
         [MPKitContainer registerKit:kitRegister];
     }
 }
@@ -69,19 +55,70 @@
     
     MPNetworkCommunication *networkCommunication = [[MPNetworkCommunication alloc] init];
     
-    MPStandaloneMessage *standaloneMessage = [[MPStandaloneMessage alloc] initWithMessageType:@"e"
-                                                                                  messageInfo:@{@"key":@"value"}
-                                                                                 uploadStatus:MPUploadStatusBatch
-                                                                                         UUID:[[NSUUID UUID] UUIDString]
-                                                                                    timestamp:[[NSDate date] timeIntervalSince1970]];
+    MPMessage *message = [[MPMessage alloc] initWithSession:nil messageType:@"e" messageInfo:@{@"key":@"value"} uploadStatus:MPUploadStatusBatch UUID:[[NSUUID UUID] UUIDString] timestamp:[[NSDate date] timeIntervalSince1970] userId:[MPPersistenceController mpId]];
     
     MPURLRequestBuilder *urlRequestBuilder = [MPURLRequestBuilder newBuilderWithURL:[networkCommunication eventURL]
-                                                                            message:[standaloneMessage serializedString]
+                                                                            message:[message serializedString]
                                                                          httpMethod:@"POST"];
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *userAgent = [urlRequestBuilder userAgent];
+#if TARGET_OS_IOS == 1
         XCTAssertNotNil(userAgent, @"Should not have been nil.");
+#else
+        XCTAssertNil(userAgent, @"Should have been nil.");
+#endif
+        [expectation fulfill];
+    });
+    
+    [self waitForExpectationsWithTimeout:1 handler:nil];
+}
+
+- (void)testCustomUserAgent {
+    [MParticle sharedInstance].customUserAgent = @"Test User Agent";
+    
+    XCTestExpectation *expectation = [self expectationWithDescription:@"User-Agent"];
+    
+    MPNetworkCommunication *networkCommunication = [[MPNetworkCommunication alloc] init];
+    
+    MPMessage *message = [[MPMessage alloc] initWithSession:nil messageType:@"e" messageInfo:@{@"key":@"value"} uploadStatus:MPUploadStatusBatch UUID:[[NSUUID UUID] UUIDString] timestamp:[[NSDate date] timeIntervalSince1970] userId:[MPPersistenceController mpId]];
+    
+    MPURLRequestBuilder *urlRequestBuilder = [MPURLRequestBuilder newBuilderWithURL:[networkCommunication eventURL]
+                                                                            message:[message serializedString]
+                                                                         httpMethod:@"POST"];
+    [urlRequestBuilder setUserAgent:nil];
+    
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *userAgent = [urlRequestBuilder userAgent];
+        XCTAssertNotNil(userAgent, @"Should not have been nil.");
+        XCTAssertTrue([userAgent isEqualToString:@"Test User Agent"], @"User Agent has an invalid value: %@", userAgent);
+        [expectation fulfill];
+    });
+    
+    [self waitForExpectationsWithTimeout:1 handler:nil];
+}
+
+- (void)testDisableCollectUserAgent {
+    [MParticle sharedInstance].customUserAgent = nil;
+    [MParticle sharedInstance].collectUserAgent = NO;
+    
+    XCTestExpectation *expectation = [self expectationWithDescription:@"User-Agent"];
+    
+    MPNetworkCommunication *networkCommunication = [[MPNetworkCommunication alloc] init];
+    
+    MPMessage *message = [[MPMessage alloc] initWithSession:nil messageType:@"e" messageInfo:@{@"key":@"value"} uploadStatus:MPUploadStatusBatch UUID:[[NSUUID UUID] UUIDString] timestamp:[[NSDate date] timeIntervalSince1970] userId:[MPPersistenceController mpId]];
+    
+    MPURLRequestBuilder *urlRequestBuilder = [MPURLRequestBuilder newBuilderWithURL:[networkCommunication eventURL]
+                                                                            message:[message serializedString]
+                                                                         httpMethod:@"POST"];
+    [urlRequestBuilder setUserAgent:nil];
+    
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *userAgent = [urlRequestBuilder userAgent];
+        XCTAssertNotNil(userAgent, @"Should not have been nil.");
+        
+        NSString *defaultUserAgent = [NSString stringWithFormat:@"mParticle Apple SDK/%@", MParticle.sharedInstance.version];
+        XCTAssertTrue([userAgent isEqualToString:defaultUserAgent], @"User Agent has an invalid value: %@", userAgent);
         [expectation fulfill];
     });
     
@@ -118,12 +155,19 @@
 
 - (void)testURLRequestComposition {
     MPNetworkCommunication *networkCommunication = [[MPNetworkCommunication alloc] init];
+    MParticle.sharedInstance.collectUserAgent = YES;
+    MParticle.sharedInstance.customUserAgent = nil;
     MPURLRequestBuilder *urlRequestBuilder = [MPURLRequestBuilder newBuilderWithURL:[networkCommunication configURL] message:nil httpMethod:@"GET"];
     NSMutableURLRequest *asyncURLRequest = [urlRequestBuilder build];
     
     NSDictionary *headersDictionary = [asyncURLRequest allHTTPHeaderFields];
     NSArray *keys = [headersDictionary allKeys];
-    NSArray *headers = @[@"User-Agent", @"Accept-Encoding", @"Content-Encoding", @"locale", @"Content-Type", @"timezone", @"secondsFromGMT", @"Date", @"x-mp-signature", @"x-mp-env", @"x-mp-kits"];
+
+    NSMutableArray *headers = @[@"User-Agent", @"Accept-Encoding", @"Content-Encoding", @"locale", @"Content-Type", @"timezone", @"secondsFromGMT", @"Date", @"x-mp-signature", @"x-mp-env", @"x-mp-kits"].mutableCopy;
+#if TARGET_OS_IOS != 1
+    [headers removeObject:@"User-Agent"];
+#endif
+    
     NSString *headerValue;
     
     for (NSString *header in headers) {
@@ -155,7 +199,7 @@
 }
 
 - (void)testEtag {
-    NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
+    MPIUserDefaults *userDefaults = [MPIUserDefaults standardUserDefaults];
     NSString *eTag = userDefaults[kMPHTTPETagHeaderKey];
     if (!eTag) {
         userDefaults[kMPHTTPETagHeaderKey] = @"1.618-2.718-3.141-42";
@@ -293,24 +337,26 @@
     [[MPKitContainer sharedInstance] configureKits:nil];
     [[MPKitContainer sharedInstance] configureKits:kitConfigs];
     
+    MParticle.sharedInstance.collectUserAgent = YES;
+    MParticle.sharedInstance.customUserAgent = nil;
+    
     XCTAssertEqual([MPURLRequestBuilder requestTimeout], 30, @"Should have been equal.");
     
     MPNetworkCommunication *networkCommunication = [[MPNetworkCommunication alloc] init];
     
-    MPStandaloneMessage *standaloneMessage = [[MPStandaloneMessage alloc] initWithMessageType:@"e"
-                                                                                  messageInfo:@{@"key":@"value"}
-                                                                                 uploadStatus:MPUploadStatusBatch
-                                                                                         UUID:[[NSUUID UUID] UUIDString]
-                                                                                    timestamp:[[NSDate date] timeIntervalSince1970]];
+    MPMessage *message = [[MPMessage alloc] initWithSession:nil messageType:@"e" messageInfo:@{@"key":@"value"} uploadStatus:MPUploadStatusBatch UUID:[[NSUUID UUID] UUIDString] timestamp:[[NSDate date] timeIntervalSince1970] userId:[MPPersistenceController mpId]];
     
     MPURLRequestBuilder *urlRequestBuilder = [MPURLRequestBuilder newBuilderWithURL:[networkCommunication eventURL]
-                                                                            message:[standaloneMessage serializedString]
+                                                                            message:[message serializedString]
                                                                          httpMethod:@"POST"];
     NSMutableURLRequest *asyncURLRequest = [urlRequestBuilder build];
     
     NSDictionary *headersDictionary = [asyncURLRequest allHTTPHeaderFields];
     NSArray *keys = [headersDictionary allKeys];
-    NSArray *headers = @[@"User-Agent", @"Accept-Encoding", @"Content-Encoding", @"locale", @"Content-Type", @"timezone", @"secondsFromGMT", @"Date", @"x-mp-signature", @"x-mp-kits"];
+    NSMutableArray *headers = @[@"User-Agent", @"Accept-Encoding", @"Content-Encoding", @"locale", @"Content-Type", @"timezone", @"secondsFromGMT", @"Date", @"x-mp-signature", @"x-mp-kits"].mutableCopy;
+#if TARGET_OS_IOS != 1
+    [headers removeObject:@"User-Agent"];
+#endif
     NSString *headerValue;
     
     for (NSString *header in headers) {

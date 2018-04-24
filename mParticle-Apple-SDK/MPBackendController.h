@@ -1,21 +1,3 @@
-//
-//  MPBackend.h
-//
-//  Copyright 2016 mParticle, Inc.
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
-
 #import "MPEnums.h"
 #import "MPNetworkCommunication.h"
 
@@ -32,7 +14,6 @@
 @class MPNotificationController;
 @class MPEvent;
 @class MPCommerceEvent;
-@class MPDataModelAbstract;
 
 @protocol MPBackendControllerDelegate;
 
@@ -73,7 +54,7 @@ typedef NS_ENUM(NSUInteger, MPInitializationStatus) {
 #if TARGET_OS_IOS == 1
 <MPNotificationControllerDelegate>
 
-@property (nonatomic, strong, nonnull) MPNotificationController *notificationController;
+@property (nonatomic, strong, nonnull) MPNotificationController *notificationController NS_EXTENSION_UNAVAILABLE_IOS("");
 #endif
 
 @property (nonatomic, weak, nullable) id<MPBackendControllerDelegate> delegate;
@@ -83,7 +64,6 @@ typedef NS_ENUM(NSUInteger, MPInitializationStatus) {
 @property (nonatomic, unsafe_unretained, readwrite) NSTimeInterval sessionTimeout;
 @property (nonatomic, unsafe_unretained, readonly) MPInitializationStatus initializationStatus;
 @property (nonatomic, unsafe_unretained) NSTimeInterval uploadInterval;
-@property (nonatomic, strong, nullable) NSMutableDictionary<NSString *, id> *userAttributes;
 
 - (nonnull instancetype)initWithDelegate:(nonnull id<MPBackendControllerDelegate>)delegate;
 - (void)beginSession:(void (^ _Nullable)(MPSession * _Nullable session, MPSession * _Nullable previousSession, MPExecStatus execStatus))completionHandler;
@@ -107,15 +87,17 @@ typedef NS_ENUM(NSUInteger, MPInitializationStatus) {
 - (void)setUserAttribute:(nonnull NSString *)key value:(nullable id)value attempt:(NSUInteger)attempt completionHandler:(void (^ _Nullable)(NSString * _Nonnull key, id _Nullable value, MPExecStatus execStatus))completionHandler;
 - (void)setUserAttribute:(nonnull NSString *)key values:(nullable NSArray<NSString *> *)values attempt:(NSUInteger)attempt completionHandler:(void (^ _Nullable)(NSString * _Nonnull key, NSArray<NSString *> * _Nullable values, MPExecStatus execStatus))completionHandler;
 - (void)setUserIdentity:(nullable NSString *)identityString identityType:(MPUserIdentity)identityType attempt:(NSUInteger)attempt completionHandler:(void (^ _Nonnull)(NSString * _Nullable identityString, MPUserIdentity identityType, MPExecStatus execStatus))completionHandler;
-- (void)startWithKey:(nonnull NSString *)apiKey secret:(nonnull NSString *)secret firstRun:(BOOL)firstRun installationType:(MPInstallationType)installationType proxyAppDelegate:(BOOL)proxyAppDelegate registerForSilentNotifications:(BOOL)registerForSilentNotifications completionHandler:(dispatch_block_t _Nonnull)completionHandler;
-- (void)saveMessage:(nonnull MPDataModelAbstract *)abstractMessage updateSession:(BOOL)updateSession;
-- (MPExecStatus)uploadWithCompletionHandler:(void (^ _Nullable)())completionHandler;
+- (void)startWithKey:(nonnull NSString *)apiKey secret:(nonnull NSString *)secret firstRun:(BOOL)firstRun installationType:(MPInstallationType)installationType proxyAppDelegate:(BOOL)proxyAppDelegate startKitsAsync:(BOOL)startKitsAsync completionHandler:(dispatch_block_t _Nonnull)completionHandler;
+- (void)saveMessage:(nonnull MPMessage *)message updateSession:(BOOL)updateSession;
+- (MPExecStatus)uploadDatabaseWithCompletionHandler:(void (^ _Nullable)(void))completionHandler;
+- (nonnull NSMutableDictionary<NSString *, id> *)userAttributesForUserId:(nonnull NSNumber *)userId;
+- (nonnull NSMutableArray<NSDictionary<NSString *, id> *> *)userIdentitiesForUserId:(nonnull NSNumber *)userId;
 
 #if TARGET_OS_IOS == 1
 - (MPExecStatus)beginLocationTrackingWithAccuracy:(CLLocationAccuracy)accuracy distanceFilter:(CLLocationDistance)distance authorizationRequest:(MPLocationAuthorizationRequest)authorizationRequest;
 - (MPExecStatus)endLocationTracking;
 - (void)handleDeviceTokenNotification:(nonnull NSNotification *)notification;
-- (void)receivedUserNotification:(nonnull MParticleUserNotification *)userNotification;
+- (void)receivedUserNotification:(nonnull MParticleUserNotification *)userNotification NS_EXTENSION_UNAVAILABLE_IOS("");
 #endif
 
 @end

@@ -1,21 +1,3 @@
-//
-//  MPPersistenceControllerTests.mm
-//
-//  Copyright 2015 mParticle, Inc.
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
-
 #import <XCTest/XCTest.h>
 #import "MPPersistenceController.h"
 #import "MPSession.h"
@@ -24,8 +6,6 @@
 #import "MPSegment.h"
 #import "MPSegmentMembership.h"
 #import "MPIConstants.h"
-#import "MPStandaloneMessage.h"
-#import "MPStandaloneUpload.h"
 #import "MPMessageBuilder.h"
 #import "MParticleUserNotification.h"
 #import "MPIntegrationAttributes.h"
@@ -56,28 +36,6 @@
     [super tearDown];
 }
 
-- (NSDictionary *)remoteNotificationDictionary:(BOOL)expired {
-    NSTimeInterval increment = expired ? -100 : 100;
-    
-    NSDictionary *remoteNotificationDictionary = @{@"aps":@{
-                                                           @"alert":@{
-                                                                   @"body":@"Your pre-historic ride has arrived.",
-                                                                   @"show-view":@NO
-                                                                   },
-                                                           @"badge":@1,
-                                                           @"sound":@"t-rex_roar.aiff",
-                                                           @"category":@"DINOSAUR_TRANSPORTATION_CATEGORY"
-                                                           },
-                                                   @"m_cmd":@1,
-                                                   @"m_cid":@2,
-                                                   @"m_cntid":@3,
-                                                   @"m_expy":MPMilliseconds([[NSDate date] timeIntervalSince1970] + increment),
-                                                   @"m_uid":@(arc4random_uniform(INT_MAX))
-                                                   };
-    
-    return remoteNotificationDictionary;
-}
-
 - (NSDictionary *)nonmParticleRemoteNotificationDictionary {
     NSDictionary *remoteNotificationDictionary = @{@"aps":@{
                                                            @"alert":@{
@@ -93,7 +51,7 @@
 }
 
 - (void)testSession {
-    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970]];
+    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970] userId:[MPPersistenceController mpId]];
     session.attributesDictionary = [@{@"key1":@"value1"} mutableCopy];
     
     MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
@@ -124,7 +82,7 @@
 }
 
 - (void)testMessage {
-    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970]];
+    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970] userId:[MPPersistenceController mpId]];
     
     MPMessageBuilder *messageBuilder = [MPMessageBuilder newBuilderWithMessageType:MPMessageTypeEvent
                                                                            session:session
@@ -138,31 +96,32 @@
     
     XCTestExpectation *expectation = [self expectationWithDescription:@"Message test"];
     
-    [persistence fetchMessagesForUploadingInSession:session
-                                  completionHandler:^(NSArray<MPMessage *> *messages) {
-                                      MPMessage *fetchedMessage = [messages lastObject];
-                                      
-                                      XCTAssertEqualObjects(message, fetchedMessage, @"Message and fetchedMessage are not equal.");
-                                      
-                                      [persistence deleteSession:session];
-                                      
-                                      [persistence fetchMessagesForUploadingInSession:session
-                                                                    completionHandler:^(NSArray *messages) {
-                                                                        if (messages) {
-                                                                            NSPredicate *predicate = [NSPredicate predicateWithFormat:@"messageId == %lld", fetchedMessage.messageId];
-                                                                            messages = [messages filteredArrayUsingPredicate:predicate];
-                                                                            XCTAssertTrue(messages.count == 0, @"Message is not being deleted.");
-                                                                        }
-                                                                        
-                                                                        [expectation fulfill];
-                                                                    }];
-                                  }];
+    [persistence fetchMessagesForUploadingWithCompletionHandler:^(NSDictionary *messagesDictionary) {
+        NSMutableDictionary *sessionsDictionary = messagesDictionary[[MPPersistenceController mpId]];
+        NSArray<MPMessage *> *messages =  [sessionsDictionary objectForKey:[NSNumber numberWithLong:session.sessionId]];
+        MPMessage *fetchedMessage = [messages lastObject];
+        
+        XCTAssertEqualObjects(message, fetchedMessage, @"Message and fetchedMessage are not equal.");
+        
+        [persistence deleteSession:session];
+        
+        [persistence fetchMessagesForUploadingWithCompletionHandler:^(NSDictionary *messagesDictionary) {
+            NSArray *messages = messagesDictionary[[MPPersistenceController mpId]];
+            if (messages) {
+                NSPredicate *predicate = [NSPredicate predicateWithFormat:@"messageId == %lld", fetchedMessage.messageId];
+                messages = [messages filteredArrayUsingPredicate:predicate];
+                XCTAssertTrue(messages.count == 0, @"Message is not being deleted.");
+            }
+            
+            [expectation fulfill];
+        }];
+    }];
     
     [self waitForExpectationsWithTimeout:DATABASE_TESTS_EXPECTATIONS_TIMEOUT handler:nil];
 }
 
 - (void)testDeleteMessages {
-    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970]];
+    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970] userId:[MPPersistenceController mpId]];
     MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
     
     for (int i = 0; i < 10; ++i) {
@@ -178,23 +137,24 @@
     
     XCTestExpectation *expectation = [self expectationWithDescription:@"Message test"];
     
-    [persistence fetchMessagesForUploadingInSession:session
-                                  completionHandler:^(NSArray<MPMessage *> *messages) {
-                                      [persistence deleteMessages:messages];
-                                      
-                                      [persistence fetchMessagesForUploadingInSession:session
-                                                                    completionHandler:^(NSArray *messages) {
-                                                                        XCTAssertNil(messages, @"Should have been nil.");
-                                                                        
-                                                                        [expectation fulfill];
-                                                                    }];
-                                  }];
+    [persistence fetchMessagesForUploadingWithCompletionHandler:^(NSDictionary *messagesDictionary) {
+        NSMutableDictionary *sessionsDictionary = messagesDictionary[[MPPersistenceController mpId]];
+        NSArray *messages =  [sessionsDictionary objectForKey:[NSNumber numberWithLong:session.sessionId]];
+        [persistence deleteMessages:messages];
+        
+        [persistence fetchMessagesForUploadingWithCompletionHandler:^(NSDictionary *messagesDictionary) {
+            NSArray *messages = messagesDictionary[[MPPersistenceController mpId]];
+            XCTAssertNil(messages, @"Should have been nil.");
+            
+            [expectation fulfill];
+        }];
+    }];
     
     [self waitForExpectationsWithTimeout:DATABASE_TESTS_EXPECTATIONS_TIMEOUT handler:nil];
 }
 
 - (void)testUpload {
-    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970]];
+    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970] userId:[MPPersistenceController mpId]];
     
     MPMessageBuilder *messageBuilder = [MPMessageBuilder newBuilderWithMessageType:MPMessageTypeEvent
                                                                            session:session
@@ -208,7 +168,7 @@
                                        kMPMessagesKey:@[[message dictionaryRepresentation]],
                                        kMPMessageIdKey:[[NSUUID UUID] UUIDString]};
     
-    MPUpload *upload = [[MPUpload alloc] initWithSession:session uploadDictionary:uploadDictionary];
+    MPUpload *upload = [[MPUpload alloc] initWithSessionId:[NSNumber numberWithLongLong:session.sessionId] uploadDictionary:uploadDictionary];
     
     MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
     
@@ -219,26 +179,24 @@
     
     XCTestExpectation *expectation = [self expectationWithDescription:@"Upload test"];
     
-    [persistence fetchUploadsInSession:session
-                     completionHandler:^(NSArray<MPUpload *> *uploads) {
-                         MPUpload *fetchedUpload = [uploads lastObject];
-                         
-                         XCTAssertEqualObjects(upload, fetchedUpload, @"Upload and fetchedUpload are not equal.");
-                         
-                         [persistence deleteUpload:upload];
-                         
-                         [persistence fetchUploadsInSession:session
-                                          completionHandler:^(NSArray *uploads) {
-                                              if (uploads) {
-                                                  NSPredicate *predicate = [NSPredicate predicateWithFormat:@"uploadId == %lld", fetchedUpload.uploadId];
-                                                  uploads = [uploads filteredArrayUsingPredicate:predicate];
-                                                  XCTAssertTrue(uploads.count == 0, @"Upload is not being deleted.");
-                                              }
-                                              
-                                              [expectation fulfill];
-                                          }];
-                         
-                     }];
+    [persistence fetchUploadsWithCompletionHandler:^(NSArray<MPUpload *> *uploads) {
+                             MPUpload *fetchedUpload = [uploads lastObject];
+                             
+                             XCTAssertEqualObjects(upload, fetchedUpload, @"Upload and fetchedUpload are not equal.");
+                             
+                             [persistence deleteUpload:upload];
+                             
+                             [persistence fetchUploadsWithCompletionHandler:^(NSArray *uploads) {
+                                                      if (uploads) {
+                                                          NSPredicate *predicate = [NSPredicate predicateWithFormat:@"uploadId == %lld", fetchedUpload.uploadId];
+                                                          uploads = [uploads filteredArrayUsingPredicate:predicate];
+                                                          XCTAssertTrue(uploads.count == 0, @"Upload is not being deleted.");
+                                                      }
+                                                      
+                                                      [expectation fulfill];
+                                                  }];
+                             
+                         }];
     
     [self waitForExpectationsWithTimeout:DATABASE_TESTS_EXPECTATIONS_TIMEOUT handler:nil];
 }
@@ -280,133 +238,10 @@
     }
 }
 
-- (void)testStandaloneMessage {
-    MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
-    NSArray<MPStandaloneMessage *> *standaloneMessages = [persistence fetchStandaloneMessages];
-    MPStandaloneMessage *standaloneMessage;
-    
-    for (standaloneMessage in standaloneMessages) {
-        [persistence deleteStandaloneMessage:standaloneMessage];
-    }
-
-    NSDictionary *messageInfo = @{kMPDeviceTokenKey:@"<Device Token>",
-                                  kMPPushMessageProviderKey:kMPPushMessageProviderValue};
-    
-    MPMessageBuilder *messageBuilder = [MPMessageBuilder newBuilderWithMessageType:MPMessageTypePushNotification session:nil messageInfo:messageInfo];
-    MPDataModelAbstract *message = [messageBuilder build];
-    XCTAssertNotNil(message, @"Stand-alone message should not have been nil.");
-    XCTAssertTrue([message isKindOfClass:[MPStandaloneMessage class]], @"Instance should have been of kind MPStandaloneMessage.");
-    
-    [persistence saveStandaloneMessage:(MPStandaloneMessage *)message];
-    
-    standaloneMessages = [persistence fetchStandaloneMessages];
-    XCTAssertEqual(standaloneMessages.count, 1, @"There should have been only 1 fetched stand-alone message.");
-    
-    standaloneMessage = [standaloneMessages firstObject];
-    XCTAssertNotNil(standaloneMessage, @"Stand-alone message should not have been nil.");
-    XCTAssertEqualObjects(standaloneMessage.messageType, @"pm", @"Stand-alone message type should have been 'pm.'");
-    XCTAssertGreaterThan(standaloneMessage.messageId, 0, @"Stand-alone message id should have been greater than 0.");
-    XCTAssertEqual(standaloneMessage.uploadStatus, MPUploadStatusBatch, @"Upload status should have been 'batch.'");
-    XCTAssertNotNil(standaloneMessage.messageData, @"Stand-alone message should contain data.");
-    XCTAssertNotNil(standaloneMessage.uuid, @"Stand-alone message should have a uuid.");
-    XCTAssertGreaterThan(standaloneMessage.timestamp, 0.0, @"Stand-alone message timestamp should have been greater than 0.");
-    
-    NSDictionary *dictionary = [standaloneMessage dictionaryRepresentation];
-    XCTAssertNotNil(dictionary, @"Stand-alone message dictionary representation should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPDeviceTokenKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPPushMessageProviderKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPMessageIdKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPMessageTypeKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPTimestampKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[@"cs"], @"Dictionary key should not have been nil.");
-    
-    MPStandaloneMessage *copyStandaloneMessage = [standaloneMessage copy];
-    XCTAssertNotEqual(copyStandaloneMessage, standaloneMessage, @"Pointer addresses should not have been the same.");
-    XCTAssertEqualObjects(copyStandaloneMessage, standaloneMessage, @"Stand-alone message is not being copied properly.");
-    
-    NSData *serializedObject = [NSKeyedArchiver archivedDataWithRootObject:standaloneMessage];
-    XCTAssertNotNil(serializedObject, @"Should not have been nil.");
-    
-    MPStandaloneMessage *deserializedObject = [NSKeyedUnarchiver unarchiveObjectWithData:serializedObject];
-    XCTAssertNotNil(deserializedObject, @"Should not have been nil.");
-    XCTAssertEqualObjects(standaloneMessage, deserializedObject, @"Should have been equal.");
-    
-    [persistence deleteStandaloneMessage:standaloneMessage];
-    standaloneMessage = [[persistence fetchStandaloneMessages] firstObject];
-    XCTAssertNil(standaloneMessage, @"Stand-alone message should have been deleted.");
-}
-
-- (void)testStandaloneUpload {
-    NSDictionary *messageInfo = @{kMPDeviceTokenKey:@"<Device Token>",
-                                  kMPPushMessageProviderKey:kMPPushMessageProviderValue};
-    
-    MPMessageBuilder *messageBuilder = [MPMessageBuilder newBuilderWithMessageType:MPMessageTypePushNotification session:nil messageInfo:messageInfo];
-    MPDataModelAbstract *message = [messageBuilder build];
-    
-    MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
-    [persistence saveStandaloneMessage:(MPStandaloneMessage *)message];
-    
-    NSArray<MPStandaloneMessage *> *persistedMessages = [persistence fetchStandaloneMessages];
-    NSUInteger numberOfMessages = persistedMessages.count;
-    NSMutableArray *standaloneMessages = [[NSMutableArray alloc] initWithCapacity:numberOfMessages];
-    NSMutableArray *preparedMessageIds = [[NSMutableArray alloc] initWithCapacity:numberOfMessages];
-    for (MPStandaloneMessage *standaloneMessage in persistedMessages) {
-        [preparedMessageIds addObject:@(standaloneMessage.messageId)];
-        [standaloneMessages addObject:[standaloneMessage dictionaryRepresentation]];
-    }
-    
-    NSDictionary *uploadDictionary = @{kMPOptOutKey:@NO,
-                                       kMPUploadIntervalKey:@600,
-                                       kMPLifeTimeValueKey:@0,
-                                       kMPMessagesKey:standaloneMessages,
-                                       kMPMessageIdKey:[[NSUUID UUID] UUIDString],
-                                       kMPTimestampKey:MPCurrentEpochInMilliseconds};
-    
-    MPStandaloneUpload *standaloneUpload = [[MPStandaloneUpload alloc] initWithUploadDictionary:uploadDictionary];
-    XCTAssertNotNil(standaloneUpload, @"Stand-alone upload should not have been nil.");
-    [persistence saveStandaloneUpload:standaloneUpload];
-    
-    [persistence deleteStandaloneMessageIds:preparedMessageIds];
-    NSArray *fetchedStandaloneMessages = [persistence fetchStandaloneMessages];
-    XCTAssertNil(fetchedStandaloneMessages, @"Stand-alone messages should had been deleted.");
-    
-    NSArray<MPStandaloneUpload *> *standaloneUploads = [persistence fetchStandaloneUploads];
-    
-    for (MPStandaloneUpload *stAlnUpld in standaloneUploads) {
-        [persistence deleteStandaloneUpload:stAlnUpld];
-    }
-    
-    standaloneUpload = [standaloneUploads firstObject];
-    XCTAssertNotNil(standaloneUpload, @"Stand-alone upload should not have been nil.");
-    XCTAssertGreaterThan(standaloneUpload.uploadId, 0, @"Stand-alone upload id should have been greater than 0.");
-    XCTAssertGreaterThan(standaloneUpload.timestamp, 0.0, @"Stand-alone upload timestamp should have been greater than 0.");
-    XCTAssertNotNil(standaloneUpload.uploadData, @"Stand-alone upload should contain data.");
-    XCTAssertNotNil(standaloneUpload.uuid, @"Stand-alone upload should have a uuid.");
-    
-    NSDictionary *dictionary = [standaloneUpload dictionaryRepresentation];
-    XCTAssertNotNil(dictionary, @"Stand-alone upload dictionary representation should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPTimestampKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPMessageIdKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPLifeTimeValueKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPMessagesKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPOptOutKey], @"Dictionary key should not have been nil.");
-    XCTAssertNotNil(dictionary[kMPUploadIntervalKey], @"Dictionary key should not have been nil.");
-    
-    MPStandaloneUpload *copyStandaloneUpload = [standaloneUpload copy];
-    XCTAssertNotEqual(copyStandaloneUpload, standaloneUpload, @"Pointer addresses should not have been the same.");
-    XCTAssertEqualObjects(copyStandaloneUpload, standaloneUpload, @"Stand-alone upload is not being copied properly.");
-    
-    NSString *serializedString = [standaloneUpload serializedString];
-    XCTAssertNotNil(serializedString, @"Should not have been nil.");
-    
-    [persistence deleteStandaloneUpload:standaloneUpload];
-    standaloneUpload = [[persistence fetchStandaloneUploads] firstObject];
-    XCTAssertNil(standaloneUpload, @"Stand-alone upload should have been deleted.");
-}
-
 - (void)testIntegrationAttributes {
     MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
-
+    [persistence deleteIntegrationAttributesForKitCode:@42];
+    
     NSNumber *kitCode = @(MPKitInstanceUrbanAirship);
     NSDictionary<NSString *, NSString *> *attributes = @{@"keyUA":@"valueUA"};
     MPIntegrationAttributes *integrationAttributes1 = [[MPIntegrationAttributes alloc] initWithKitCode:kitCode attributes:attributes];
@@ -414,7 +249,7 @@
     NSArray *integrationAttributesArray = [persistence fetchIntegrationAttributes];
     XCTAssertNotNil(integrationAttributesArray);
     XCTAssertEqual(integrationAttributesArray.count, 1);
-
+    
     kitCode = @(MPKitInstanceButton);
     attributes = @{@"keyButton":@"valueButton"};
     MPIntegrationAttributes *integrationAttributes2 = [[MPIntegrationAttributes alloc] initWithKitCode:kitCode attributes:attributes];
@@ -422,7 +257,7 @@
     integrationAttributesArray = [persistence fetchIntegrationAttributes];
     XCTAssertNotNil(integrationAttributesArray);
     XCTAssertEqual(integrationAttributesArray.count, 2);
-
+    
     kitCode = @(MPKitInstanceButton);
     attributes = @{@"keyButton2":@"valueButton2"};
     integrationAttributes2 = [[MPIntegrationAttributes alloc] initWithKitCode:kitCode attributes:attributes];
@@ -430,7 +265,7 @@
     integrationAttributesArray = [persistence fetchIntegrationAttributes];
     XCTAssertNotNil(integrationAttributesArray);
     XCTAssertEqual(integrationAttributesArray.count, 2);
-
+    
     [persistence deleteIntegrationAttributes:integrationAttributes2];
     integrationAttributesArray = [persistence fetchIntegrationAttributes];
     XCTAssertNotNil(integrationAttributesArray);
@@ -440,7 +275,7 @@
     [persistence deleteIntegrationAttributesForKitCode:kitCode];
     integrationAttributesArray = [persistence fetchIntegrationAttributes];
     XCTAssertNil(integrationAttributesArray);
-
+    
     kitCode = @(MPKitInstanceButton);
     attributes = @{@"keyButton":@"valueButton"};
     integrationAttributes2 = [[MPIntegrationAttributes alloc] initWithKitCode:kitCode attributes:attributes];
@@ -448,47 +283,10 @@
     integrationAttributesArray = [persistence fetchIntegrationAttributes];
     XCTAssertNotNil(integrationAttributesArray);
     XCTAssertEqual(integrationAttributesArray.count, 1);
-
+    
     [persistence deleteAllIntegrationAttributes];
     integrationAttributesArray = [persistence fetchIntegrationAttributes];
     XCTAssertNil(integrationAttributesArray);
-}
-
-- (void)testMessageCount {
-    MPSession *session = [[MPSession alloc] initWithStartTime:[[NSDate date] timeIntervalSince1970]];
-    
-    MPMessageBuilder *messageBuilder = [MPMessageBuilder newBuilderWithMessageType:MPMessageTypeEvent
-                                                                           session:session
-                                                                       messageInfo:@{@"MessageKey1":@"MessageValue1"}];
-    MPMessage *message = (MPMessage *)[messageBuilder build];
-    
-    MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
-
-    NSUInteger messageCount = [persistence countMesssagesForUploadInSession:session];
-    XCTAssertEqual(messageCount, 0);
-
-    [persistence saveMessage:message];
-    
-    messageCount = [persistence countMesssagesForUploadInSession:session];
-    XCTAssertEqual(messageCount, 1);
-    
-    [persistence deleteSession:session];
-    
-    NSDictionary *messageInfo = @{kMPDeviceTokenKey:@"<Device Token>",
-                                  kMPPushMessageProviderKey:kMPPushMessageProviderValue};
-    
-    messageBuilder = [MPMessageBuilder newBuilderWithMessageType:MPMessageTypePushNotification session:nil messageInfo:messageInfo];
-    MPStandaloneMessage *standaloneMessage = (MPStandaloneMessage *)[messageBuilder build];
-
-    messageCount = [persistence countStandaloneMessages];
-    XCTAssertEqual(messageCount, 0);
-
-    [persistence saveStandaloneMessage:standaloneMessage];
-
-    messageCount = [persistence countStandaloneMessages];
-    XCTAssertEqual(messageCount, 1);
-    
-    [persistence deleteStandaloneMessage:standaloneMessage];
 }
 
 - (void)testConsumerInfo {
@@ -514,14 +312,14 @@
                                              @"das":@"7754fbee-1b83-4cab-9b59-34518c14ae85",
                                              @"mpid":@3452189063653540060
                                              };
-
+    
     MPConsumerInfo *consumerInfo = [[MPConsumerInfo alloc] init];
     [consumerInfo updateWithConfiguration:consumerInfoDictionary];
     
     MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
     [persistence saveConsumerInfo:consumerInfo];
     
-    MPConsumerInfo *fetchedConsumerInfo = [persistence fetchConsumerInfo];
+    MPConsumerInfo *fetchedConsumerInfo = [persistence fetchConsumerInfoForUserId:[MPPersistenceController mpId]];
     XCTAssertNotNil(fetchedConsumerInfo);
     
     NSDictionary *cookiesDictionary = [consumerInfo cookiesDictionaryRepresentation];
@@ -529,7 +327,7 @@
     XCTAssertEqualObjects(cookiesDictionary, fetchedCookiesDictionary);
     
     [persistence deleteConsumerInfo];
-    fetchedConsumerInfo = [persistence fetchConsumerInfo];
+    fetchedConsumerInfo = [persistence fetchConsumerInfoForUserId:[MPPersistenceController mpId]];
     XCTAssertNil(fetchedConsumerInfo);
     
     consumerInfo = [[MPConsumerInfo alloc] init];
@@ -539,7 +337,7 @@
     
     XCTestExpectation *expectation = [self expectationWithDescription:@"Consumer Info"];
     
-    [persistence fetchConsumerInfo:^(MPConsumerInfo * _Nullable consumerInfo) {
+    [persistence fetchConsumerInfoForUserId:[MPPersistenceController mpId] completionHandler:^(MPConsumerInfo * _Nullable consumerInfo) {
         XCTAssertNotNil(consumerInfo);
         [persistence deleteConsumerInfo];
         
@@ -574,122 +372,5 @@
     forwardRecords = [persistence fetchForwardRecords];
     XCTAssertNil(forwardRecords);
 }
-
-#if TARGET_OS_IOS == 1
-- (void)testRemoteNotification {
-    MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
-
-    [persistence fetchUserNotificationCampaignHistory:^(NSArray<MParticleUserNotification *> *userNotificationCampaignHistory) {
-        for (MParticleUserNotification *userNotification in userNotificationCampaignHistory) {
-            [persistence deleteUserNotification:userNotification];
-        }
-    }];
-
-    NSDictionary *remoteNotificationDictionary = [self remoteNotificationDictionary:NO];
-    
-    MParticleUserNotification *userNotification = [[MParticleUserNotification alloc] initWithDictionary:remoteNotificationDictionary
-                                                                                       actionIdentifier:nil
-                                                                                                  state:kMPPushNotificationStateBackground
-                                                                                               behavior:MPUserNotificationBehaviorDirectOpen
-                                                                                                   mode:MPUserNotificationModeRemote
-                                                                                            runningMode:MPUserNotificationRunningModeBackground];
-    
-    XCTAssertNotNil(userNotification, @"Remote notification should not have been nil.");
-    
-    [persistence saveUserNotification:userNotification];
-    
-    XCTAssertGreaterThan(userNotification.userNotificationId, 0, @"Remote notification id is not being assign.");
-    
-    MParticleUserNotification *latestRemoteNotification = [[persistence fetchDisplayedRemoteUserNotifications] firstObject];
-    XCTAssertNotNil(latestRemoteNotification, @"Latest remote notification should not have been nil.");
-    XCTAssertEqualObjects(userNotification, latestRemoteNotification);
-    XCTAssertFalse(userNotification.hasBeenUsedInInfluencedOpen, @"Should not have been marked as used in influenced open.");
-    
-    userNotification.hasBeenUsedInInfluencedOpen = YES;
-    [persistence updateUserNotification:userNotification];
-    
-    latestRemoteNotification = [[persistence fetchDisplayedRemoteUserNotifications] firstObject];
-    
-    XCTestExpectation *expectation = [self expectationWithDescription:@"Remote notification test"];
-    
-    [persistence fetchUserNotificationCampaignHistory:^(NSArray<MParticleUserNotification *> *userNotificationCampaignHistory) {
-        MParticleUserNotification *fetchedRemoteNotification = [userNotificationCampaignHistory lastObject];
-        XCTAssertNotNil(fetchedRemoteNotification, @"Fetched remote notification should not have been nil.");
-        XCTAssertTrue(fetchedRemoteNotification.hasBeenUsedInInfluencedOpen, @"Should have been marked as used in influenced open.");
-        XCTAssertTrue(latestRemoteNotification.hasBeenUsedInInfluencedOpen, @"Should have been marked as used in influenced open.");
-        
-        [persistence deleteUserNotification:userNotification];
-        
-        [persistence fetchUserNotificationCampaignHistory:^(NSArray *userNotificationCampaignHistory) {
-            MParticleUserNotification *fetchedRemoteNotification = [userNotificationCampaignHistory lastObject];
-            XCTAssertNil(fetchedRemoteNotification, @"Remote notification should have been deleted.");
-            
-            [expectation fulfill];
-        }];
-    }];
-    
-    [self waitForExpectationsWithTimeout:DATABASE_TESTS_EXPECTATIONS_TIMEOUT handler:nil];
-}
-
-- (void)testExpiredRemoteNotification {
-    MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
-    
-    [persistence fetchUserNotificationCampaignHistory:^(NSArray<MParticleUserNotification *> *userNotificationCampaignHistory) {
-        for (MParticleUserNotification *userNotification in userNotificationCampaignHistory) {
-            [persistence deleteUserNotification:userNotification];
-        }
-    }];
-
-    NSDictionary *remoteNotificationDictionary = [self remoteNotificationDictionary:YES];
-    
-    MParticleUserNotification *userNotification = [[MParticleUserNotification alloc] initWithDictionary:remoteNotificationDictionary
-                                                                                       actionIdentifier:nil
-                                                                                                  state:kMPPushNotificationStateBackground
-                                                                                               behavior:MPUserNotificationBehaviorReceived
-                                                                                                   mode:MPUserNotificationModeRemote
-                                                                                            runningMode:MPUserNotificationRunningModeBackground];
-    
-
-    [persistence saveUserNotification:userNotification];
-    
-    XCTestExpectation *expectation = [self expectationWithDescription:@"Expired remote notification test"];
-    
-    [persistence fetchUserNotificationCampaignHistory:^(NSArray<MParticleUserNotification *> *userNotificationCampaignHistory) {
-        MParticleUserNotification *fetchedRemoteNotification = [userNotificationCampaignHistory lastObject];
-        
-        fetchedRemoteNotification = [[persistence fetchUserNotifications] firstObject];
-        XCTAssertNotNil(fetchedRemoteNotification, @"Fetched remote notification should not have been nil.");
-        
-        [persistence deleteExpiredUserNotifications];
-        fetchedRemoteNotification = [[persistence fetchUserNotifications] firstObject];
-        XCTAssertNil(fetchedRemoteNotification, @"Fetched remote notification should have been nil.");
-        
-        [expectation fulfill];
-    }];
-    
-    [self waitForExpectationsWithTimeout:DATABASE_TESTS_EXPECTATIONS_TIMEOUT handler:nil];
-}
-
-- (void)testNonmParticleRemoteNotification {
-    NSDictionary *remoteNotificationDictionary = [self nonmParticleRemoteNotificationDictionary];
-    
-    MParticleUserNotification *userNotification = [[MParticleUserNotification alloc] initWithDictionary:remoteNotificationDictionary
-                                                                                       actionIdentifier:nil
-                                                                                                  state:kMPPushNotificationStateBackground
-                                                                                               behavior:(MPUserNotificationBehaviorDirectOpen | MPUserNotificationBehaviorRead)
-                                                                                                   mode:MPUserNotificationModeRemote
-                                                                                            runningMode:MPUserNotificationRunningModeBackground];
-    
-    MPPersistenceController *persistence = [MPPersistenceController sharedInstance];
-    [persistence saveUserNotification:userNotification];
-    MParticleUserNotification *latestRemoteNotification = [[persistence fetchDisplayedRemoteUserNotifications] firstObject];
-    
-    if (latestRemoteNotification) {
-        XCTAssertNotEqual(userNotification, latestRemoteNotification, @"Non mParticle user notifications should not have been persisted.");
-    } else {
-        XCTAssertNil(latestRemoteNotification, @"Non mParticle user notifications should not be persisted.");
-    }
-}
-#endif
 
 @end
